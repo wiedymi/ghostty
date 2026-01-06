@@ -20,6 +20,7 @@ const CoreInspector = @import("../inspector/main.zig").Inspector;
 const CoreSurface = @import("../Surface.zig");
 const configpkg = @import("../config.zig");
 const Config = configpkg.Config;
+const termio = @import("../termio.zig");
 
 const log = std.log.scoped(.embedded_window);
 
@@ -2195,6 +2196,45 @@ pub const CAPI = struct {
                 v.deinit();
                 ptr.backend = null;
             }
+        }
+
+        // =========================================================================
+        // Custom I/O API - For SSH clients and other external I/O sources
+        // =========================================================================
+
+        /// The callback function type for writing data from terminal to external source.
+        pub const WriteFn = termio.Callback.WriteFn;
+
+        /// Feed data into the terminal for display (e.g., SSH channel output).
+        /// This is the "output" from the remote source that should be rendered.
+        export fn ghostty_surface_feed_data(
+            ptr: *Surface,
+            data: [*]const u8,
+            len: usize,
+        ) void {
+            if (len == 0) return;
+            ptr.core_surface.io.processOutput(data[0..len]);
+        }
+
+        /// Set the write callback for custom I/O backend.
+        /// This callback is invoked when the terminal wants to send data
+        /// (e.g., keyboard input that should go to SSH channel).
+        export fn ghostty_surface_set_write_callback(
+            ptr: *Surface,
+            write_fn: ?WriteFn,
+            userdata: ?*anyopaque,
+        ) void {
+            // Access the termio and set callback on its backend thread data
+            // This requires the IO thread to be running
+            const io = &ptr.core_surface.io;
+
+            // Send a message to the IO thread to update the callback
+            io.queueMessage(.{
+                .set_write_callback = .{
+                    .write_fn = write_fn,
+                    .userdata = userdata,
+                },
+            }, .unlocked);
         }
     };
 };

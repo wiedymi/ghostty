@@ -350,6 +350,16 @@ fn drainMailbox(
                     self.flags.linefeed_mode,
                 );
             },
+            .set_write_callback => |v| {
+                // Only applies to callback backend
+                switch (data.backend) {
+                    .callback => |*callback_data| {
+                        callback_data.write_fn = v.write_fn;
+                        callback_data.userdata = v.userdata;
+                    },
+                    else => {},
+                }
+            },
         }
     }
 

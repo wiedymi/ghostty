@@ -76,6 +76,9 @@ pub const Message = union(enum) {
     /// Write where the data is allocated and must be freed.
     write_alloc: WriteReq.Alloc,
 
+    /// Set the write callback for the callback backend.
+    set_write_callback: SetWriteCallback,
+
     /// Return a write request for the given data. This will use
     /// write_small if it fits or write_alloc otherwise. This should NOT
     /// be used for stable pointers which can be manually set to write_stable.
@@ -93,6 +96,12 @@ pub const Message = union(enum) {
         csi_14_t,
         csi_16_t,
         csi_18_t,
+    };
+
+    /// Payload for setting the write callback on callback backend.
+    pub const SetWriteCallback = struct {
+        write_fn: ?termio.Callback.WriteFn,
+        userdata: ?*anyopaque,
     };
 };
 
