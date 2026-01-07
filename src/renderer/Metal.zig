@@ -167,6 +167,14 @@ pub fn loopEnter(self: *Metal) void {
         @ptrCast(&displayCallback),
         @ptrCast(renderer),
     );
+
+    // On iOS, the layer is added as a sublayer rather than being the view's
+    // backing layer. This means we need to explicitly trigger the first
+    // display after setting up the callback, since the bounds were already
+    // set before the callback was registered.
+    if (comptime builtin.os.tag == .ios) {
+        self.layer.layer.msgSend(void, objc.sel("setNeedsDisplay"), .{});
+    }
 }
 
 fn displayCallback(renderer: *Renderer) align(8) void {
@@ -251,6 +259,13 @@ pub fn initTarget(self: *const Metal, width: usize, height: usize) !Target {
 
 /// Present the provided target.
 pub inline fn present(self: *Metal, target: Target, sync: bool) !void {
+    // On iOS, always go through setSurface so we stay on the main thread.
+    // setSurface will synchronously update if already on the main thread.
+    if (comptime builtin.os.tag == .ios) {
+        try self.layer.setSurface(target.surface);
+        return;
+    }
+
     if (sync) {
         self.layer.setSurfaceSync(target.surface);
     } else {
