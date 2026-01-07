@@ -20,6 +20,10 @@ pub const IOSurface = opaque {
     };
 
     pub fn init(properties: Properties) Allocator.Error!*IOSurface {
+        // Metal requires IOSurface row bytes to be aligned (64-byte is safe).
+        const row_bytes: c_int = @intCast(
+            (properties.width * properties.bytes_per_element + 63) & ~@as(c_int, 63),
+        );
         var w = try foundation.Number.create(.int, &properties.width);
         defer w.release();
         var h = try foundation.Number.create(.int, &properties.height);
@@ -29,14 +33,18 @@ pub const IOSurface = opaque {
         var bpe = try foundation.Number.create(.int, &properties.bytes_per_element);
         defer bpe.release();
 
+        var rb = try foundation.Number.create(.int, &row_bytes);
+        defer rb.release();
+
         var properties_dict = try foundation.Dictionary.create(
             &[_]?*const anyopaque{
                 c.kIOSurfaceWidth,
                 c.kIOSurfaceHeight,
                 c.kIOSurfacePixelFormat,
                 c.kIOSurfaceBytesPerElement,
+                c.kIOSurfaceBytesPerRow,
             },
-            &[_]?*const anyopaque{ w, h, pf, bpe },
+            &[_]?*const anyopaque{ w, h, pf, bpe, rb },
         );
         defer properties_dict.release();
 
@@ -84,14 +92,14 @@ pub const IOSurface = opaque {
     }
 
     pub inline fn lock(self: *IOSurface) void {
-        c.IOSurfaceLock(
+        _ = c.IOSurfaceLock(
             @ptrCast(self),
             0,
             null,
         );
     }
     pub inline fn unlock(self: *IOSurface) void {
-        c.IOSurfaceUnlock(
+        _ = c.IOSurfaceUnlock(
             @ptrCast(self),
             0,
             null,

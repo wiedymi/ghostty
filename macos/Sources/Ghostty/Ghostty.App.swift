@@ -260,7 +260,11 @@ extension Ghostty {
         #if os(iOS)
         // MARK: Ghostty Callbacks (iOS)
 
-        static func wakeup(_ userdata: UnsafeMutableRawPointer?) {}
+        static func wakeup(_ userdata: UnsafeMutableRawPointer?) {
+            guard let userdata else { return }
+            let state = Unmanaged<App>.fromOpaque(userdata).takeUnretainedValue()
+            DispatchQueue.main.async { state.appTick() }
+        }
         static func action(_ app: ghostty_app_t, target: ghostty_target_s, action: ghostty_action_s) -> Bool { return false }
         static func readClipboard(
             _ userdata: UnsafeMutableRawPointer?,

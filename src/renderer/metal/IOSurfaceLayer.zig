@@ -3,6 +3,7 @@
 const IOSurfaceLayer = @This();
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const objc = @import("objc");
 const macos = @import("macos");
@@ -32,9 +33,14 @@ pub fn init() !IOSurfaceLayer {
     // The layer gravity is set to top-left so that the contents aren't
     // stretched during resize operations before a new frame has been drawn.
     layer.setProperty("contentsGravity", macos.animation.kCAGravityTopLeft);
+    layer.setProperty("opaque", true);
 
     layer.setInstanceVariable("display_cb", .{ .value = null });
     layer.setInstanceVariable("display_ctx", .{ .value = null });
+
+    if (comptime builtin.os.tag == .ios) {
+        log.info("IOSurfaceLayer init: using CAIOSurfaceLayer on iOS", .{});
+    }
 
     return .{ .layer = layer };
 }
@@ -107,15 +113,47 @@ fn setSurfaceCallback(
     const scale = layer.getProperty(f64, "contentsScale");
     const width: usize = @intFromFloat(bounds.size.width * scale);
     const height: usize = @intFromFloat(bounds.size.height * scale);
+    if (comptime builtin.os.tag == .ios) {
+        log.info(
+            "setSurfaceCallback: bounds={d}x{d} scale={d:.3} layer_px={d}x{d} surface={d}x{d} bpr={d} fmt={d}",
+            .{
+                bounds.size.width,
+                bounds.size.height,
+                scale,
+                width,
+                height,
+                surface.getWidth(),
+                surface.getHeight(),
+                surface.getBytesPerRow(),
+                @intFromEnum(surface.getPixelFormat()),
+            },
+        );
+    }
     if (width != surface.getWidth() or height != surface.getHeight()) {
         log.debug(
-            "setSurfaceCallback(): surface is wrong size for layer, discarding. surface = {d}x{d}, layer = {d}x{d}",
+            "setSurfaceCallback(): surface is wrong size for layer, surface = {d}x{d}, layer = {d}x{d}",
             .{ surface.getWidth(), surface.getHeight(), width, height },
         );
-        return;
+
+        // On iOS, try to correct the contentsScale instead of discarding.
+        if (comptime builtin.os.tag == .ios) {
+            const bw = bounds.size.width;
+            const bh = bounds.size.height;
+            if (bw > 0 and bh > 0) {
+                const sx: f64 = @as(f64, @floatFromInt(surface.getWidth())) / bw;
+                const sy: f64 = @as(f64, @floatFromInt(surface.getHeight())) / bh;
+                const new_scale: f64 = if (sx > sy) sx else sy;
+                layer.setProperty("contentsScale", new_scale);
+            }
+        } else {
+            return;
+        }
     }
 
     layer.setProperty("contents", surface);
+    if (comptime builtin.os.tag == .ios) {
+        log.info("setSurfaceCallback: contents set", .{});
+    }
 }
 
 pub const DisplayCallback = ?*align(8) const fn (?*anyopaque) void;
@@ -138,11 +176,15 @@ pub fn setDisplayCallback(
 fn getSubclass() error{ObjCFailed}!objc.Class {
     if (Subclass) |c| return c;
 
-    const CALayer =
-        objc.getClass("CALayer") orelse return error.ObjCFailed;
+    // On iOS, use CAIOSurfaceLayer as base class for better IOSurface integration
+    const base_layer = switch (comptime builtin.os.tag) {
+        .ios => objc.getClass("CAIOSurfaceLayer") orelse
+            objc.getClass("CALayer") orelse return error.ObjCFailed,
+        else => objc.getClass("CALayer") orelse return error.ObjCFailed,
+    };
 
     var subclass =
-        objc.allocateClassPair(CALayer, "IOSurfaceLayer") orelse return error.ObjCFailed;
+        objc.allocateClassPair(base_layer, "IOSurfaceLayer") orelse return error.ObjCFailed;
     errdefer objc.disposeClassPair(subclass);
 
     if (!subclass.addIvar("display_cb")) return error.ObjCFailed;

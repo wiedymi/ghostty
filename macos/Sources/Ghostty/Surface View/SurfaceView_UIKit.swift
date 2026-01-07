@@ -1,5 +1,23 @@
 import SwiftUI
+import Foundation
 import GhosttyKit
+import IOSurface
+
+@_silgen_name("ghostty_surface_feed_data")
+private func ghostty_surface_feed_data(_ surface: ghostty_surface_t, _ data: UnsafePointer<UInt8>, _ len: Int)
+
+#if DEBUG
+private func ghosttyDebugFeed(surface: ghostty_surface_t) {
+    let text = "Ghostty iOS debug feed\\r\\n$ "
+    let bytes = Array(text.utf8)
+    bytes.withUnsafeBufferPointer { buf in
+        guard let base = buf.baseAddress else { return }
+        ghostty_surface_feed_data(surface, base, buf.count)
+    }
+    ghostty_surface_refresh(surface)
+    ghostty_surface_draw(surface)
+}
+#endif
 
 extension Ghostty {
     /// The UIView implementation for a terminal surface.
@@ -71,6 +89,7 @@ extension Ghostty {
             // is non-zero so that our layer bounds are non-zero so that our renderer
             // can do SOMETHING.
             super.init(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+            self.contentScaleFactor = UIScreen.main.scale
 
             // Setup our surface. This will also initialize all the terminal IO.
             let surface_cfg = baseConfig ?? SurfaceConfiguration()
@@ -82,6 +101,16 @@ extension Ghostty {
                 return
             }
             self.surface = surface;
+
+#if DEBUG
+            if ProcessInfo.processInfo.environment["GHOSTTY_DEBUG_FEED"] == "1" {
+                let surface_ref = surface
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    print("[SurfaceView] debug feed injecting")
+                    ghosttyDebugFeed(surface: surface_ref)
+                }
+            }
+#endif
         }
 
         required init?(coder: NSCoder) {
@@ -117,18 +146,57 @@ extension Ghostty {
                 UInt32(size.width * scale),
                 UInt32(size.height * scale)
             )
+
+            // Force a draw on iOS to ensure IOSurface contents are produced.
+            print("[SurfaceView] sizeDidChange -> refresh/draw size=\(size) scale=\(scale)")
+            ghostty_surface_refresh(surface)
+            ghostty_surface_draw(surface)
         }
 
         // MARK: UIView
 
+        // Use default CALayer; Ghostty adds its own IOSurfaceLayer sublayer.
         override class var layerClass: AnyClass {
-            get {
-                return CAMetalLayer.self
-            }
+            CALayer.self
         }
 
         override func didMoveToWindow() {
             sizeDidChange(frame.size)
+        }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            // Update sublayer frames to match view bounds
+            print("[SurfaceView] layoutSubviews: bounds=\(bounds), sublayers=\(layer.sublayers?.count ?? 0)")
+            if let sublayers = layer.sublayers {
+                for (i, sublayer) in sublayers.enumerated() {
+                    let scale = contentScaleFactor
+                    print("[SurfaceView] sublayer[\(i)] before: frame=\(sublayer.frame), bounds=\(sublayer.bounds)")
+                    sublayer.frame = bounds
+                    sublayer.contentsScale = contentScaleFactor
+                    print("[SurfaceView] sublayer[\(i)] after: frame=\(sublayer.frame)")
+                    let className = String(describing: type(of: sublayer))
+                    let expectedW = sublayer.bounds.width * scale
+                    let expectedH = sublayer.bounds.height * scale
+                    print("[SurfaceView] sublayer[\(i)] class=\(className) scale=\(sublayer.contentsScale) expectedPx=\(expectedW)x\(expectedH)")
+                    if let contents = sublayer.contents, let ioSurface = contents as? IOSurface {
+                        let w = IOSurfaceGetWidth(ioSurface)
+                        let h = IOSurfaceGetHeight(ioSurface)
+                        let bpr = IOSurfaceGetBytesPerRow(ioSurface)
+                        let pf = IOSurfaceGetPixelFormat(ioSurface)
+                        print("[SurfaceView] iosurface[\(i)]: \(w)x\(h) bpr=\(bpr) pf=\(pf)")
+                    } else {
+                        print("[SurfaceView] iosurface[\(i)]: no contents")
+                    }
+                }
+            }
+            sizeDidChange(bounds.size)
+
+            if let surface = surface {
+                print("[SurfaceView] layoutSubviews -> refresh/draw bounds=\(bounds) scale=\(contentScaleFactor)")
+                ghostty_surface_refresh(surface)
+                ghostty_surface_draw(surface)
+            }
         }
     }
 }

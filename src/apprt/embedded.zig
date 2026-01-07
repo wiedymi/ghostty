@@ -409,6 +409,7 @@ pub const Surface = struct {
     app: *App,
     platform: Platform,
     userdata: ?*anyopaque = null,
+    use_custom_io: bool = false,
     core_surface: CoreSurface,
     content_scale: apprt.ContentScale,
     size: apprt.SurfaceSize,
@@ -460,6 +461,9 @@ pub const Surface = struct {
 
         /// Context for the new surface
         context: apprt.surface.NewSurfaceContext = .window,
+
+        /// Use callback-based I/O instead of spawning a child process.
+        use_custom_io: bool = false,
     };
 
     pub fn init(self: *Surface, app: *App, opts: Options) !void {
@@ -467,6 +471,7 @@ pub const Surface = struct {
             .app = app,
             .platform = try .init(opts.platform_tag, opts.platform),
             .userdata = opts.userdata,
+            .use_custom_io = opts.use_custom_io,
             .core_surface = undefined,
             .content_scale = .{
                 .x = @floatCast(opts.scale_factor),

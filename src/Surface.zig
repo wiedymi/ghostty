@@ -608,53 +608,66 @@ pub fn init(
     else
         config.command;
 
+    const use_custom_io = if (comptime @hasField(apprt.runtime.Surface, "use_custom_io"))
+        rt_surface.use_custom_io
+    else
+        false;
+
     // Start our IO implementation
     // This separate block ({}) is important because our errdefers must
     // be scoped here to be valid.
     {
-        var env = rt_surface.defaultTermioEnv() catch |err| env: {
-            // If an error occurs, we don't want to block surface startup.
-            log.warn("error getting env map for surface err={}", .{err});
-            break :env internal_os.getEnvMap(alloc) catch
-                std.process.EnvMap.init(alloc);
-        };
-        errdefer env.deinit();
-
-        // don't leak GHOSTTY_LOG to any subprocesses
-        env.remove("GHOSTTY_LOG");
-
-        // Initialize our IO backend
-        var io_exec = try termio.Exec.init(alloc, .{
-            .command = command,
-            .env = env,
-            .env_override = config.env,
-            .shell_integration = config.@"shell-integration",
-            .shell_integration_features = config.@"shell-integration-features",
-            .working_directory = config.@"working-directory",
-            .resources_dir = global_state.resources_dir.host(),
-            .term = config.term,
-
-            // Get the cgroup if we're on linux and have the decl. I'd love
-            // to change this from a decl to a surface options struct because
-            // then we can do memory management better (don't need to retain
-            // the string around).
-            .linux_cgroup = if (comptime builtin.os.tag == .linux and
-                @hasDecl(apprt.runtime.Surface, "cgroup"))
-                rt_surface.cgroup()
-            else
-                Command.linux_cgroup_default,
-        });
-        errdefer io_exec.deinit();
-
-        // Initialize our IO mailbox
         var io_mailbox = try termio.Mailbox.initSPSC(alloc);
         errdefer io_mailbox.deinit(alloc);
+
+        var backend: termio.Backend = undefined;
+        if (use_custom_io) {
+            var io_callback = try termio.Callback.init(alloc, .{});
+            errdefer io_callback.deinit();
+            backend = .{ .callback = io_callback };
+        } else {
+            var env = rt_surface.defaultTermioEnv() catch |err| env: {
+                // If an error occurs, we don't want to block surface startup.
+                log.warn("error getting env map for surface err={}", .{err});
+                break :env internal_os.getEnvMap(alloc) catch
+                    std.process.EnvMap.init(alloc);
+            };
+            errdefer env.deinit();
+
+            // don't leak GHOSTTY_LOG to any subprocesses
+            env.remove("GHOSTTY_LOG");
+
+            // Initialize our IO backend
+            var io_exec = try termio.Exec.init(alloc, .{
+                .command = command,
+                .env = env,
+                .env_override = config.env,
+                .shell_integration = config.@"shell-integration",
+                .shell_integration_features = config.@"shell-integration-features",
+                .working_directory = config.@"working-directory",
+                .resources_dir = global_state.resources_dir.host(),
+                .term = config.term,
+
+                // Get the cgroup if we're on linux and have the decl. I'd love
+                // to change this from a decl to a surface options struct because
+                // then we can do memory management better (don't need to retain
+                // the string around).
+                .linux_cgroup = if (comptime builtin.os.tag == .linux and
+                    @hasDecl(apprt.runtime.Surface, "cgroup"))
+                    rt_surface.cgroup()
+                else
+                    Command.linux_cgroup_default,
+            });
+            errdefer io_exec.deinit();
+
+            backend = .{ .exec = io_exec };
+        }
 
         try termio.Termio.init(&self.io, alloc, .{
             .size = size,
             .full_config = config,
             .config = try termio.Termio.DerivedConfig.init(alloc, config),
-            .backend = .{ .exec = io_exec },
+            .backend = backend,
             .mailbox = io_mailbox,
             .renderer_state = &self.renderer_state,
             .renderer_wakeup = render_thread.wakeup,

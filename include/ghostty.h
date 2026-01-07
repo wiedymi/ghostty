@@ -40,6 +40,11 @@ typedef enum {
   GHOSTTY_PLATFORM_IOS,
 } ghostty_platform_e;
 
+// Callback for custom I/O write handler.
+typedef void (*ghostty_surface_write_fn)(void* userdata,
+                                         const uint8_t* data,
+                                         size_t len);
+
 typedef enum {
   GHOSTTY_CLIPBOARD_STANDARD,
   GHOSTTY_CLIPBOARD_SELECTION,
@@ -442,6 +447,7 @@ typedef struct {
   const char* initial_input;
   bool wait_after_command;
   ghostty_surface_context_e context;
+  bool use_custom_io;
 } ghostty_surface_config_s;
 
 typedef struct {
@@ -1055,6 +1061,11 @@ bool ghostty_surface_needs_confirm_quit(ghostty_surface_t);
 bool ghostty_surface_process_exited(ghostty_surface_t);
 void ghostty_surface_refresh(ghostty_surface_t);
 void ghostty_surface_draw(ghostty_surface_t);
+// Custom I/O API - feed output into the terminal and receive writes.
+void ghostty_surface_feed_data(ghostty_surface_t, const uint8_t*, size_t);
+void ghostty_surface_set_write_callback(ghostty_surface_t,
+                                        ghostty_surface_write_fn,
+                                        void*);
 void ghostty_surface_set_content_scale(ghostty_surface_t, double, double);
 void ghostty_surface_set_focus(ghostty_surface_t, bool);
 void ghostty_surface_set_occlusion(ghostty_surface_t, bool);
