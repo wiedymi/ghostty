@@ -10,7 +10,6 @@ const macos = @import("macos");
 
 const IOSurface = macos.iosurface.IOSurface;
 
-const log = std.log.scoped(.IOSurfaceLayer);
 
 /// We subclass CALayer with a custom display handler, we only need
 /// to make the subclass once, and then we can use it as a singleton.
@@ -37,10 +36,6 @@ pub fn init() !IOSurfaceLayer {
 
     layer.setInstanceVariable("display_cb", .{ .value = null });
     layer.setInstanceVariable("display_ctx", .{ .value = null });
-
-    if (comptime builtin.os.tag == .ios) {
-        log.info("IOSurfaceLayer init: using CAIOSurfaceLayer on iOS", .{});
-    }
 
     return .{ .layer = layer };
 }
@@ -113,28 +108,7 @@ fn setSurfaceCallback(
     const scale = layer.getProperty(f64, "contentsScale");
     const width: usize = @intFromFloat(bounds.size.width * scale);
     const height: usize = @intFromFloat(bounds.size.height * scale);
-    if (comptime builtin.os.tag == .ios) {
-        log.info(
-            "setSurfaceCallback: bounds={d}x{d} scale={d:.3} layer_px={d}x{d} surface={d}x{d} bpr={d} fmt={d}",
-            .{
-                bounds.size.width,
-                bounds.size.height,
-                scale,
-                width,
-                height,
-                surface.getWidth(),
-                surface.getHeight(),
-                surface.getBytesPerRow(),
-                @intFromEnum(surface.getPixelFormat()),
-            },
-        );
-    }
     if (width != surface.getWidth() or height != surface.getHeight()) {
-        log.debug(
-            "setSurfaceCallback(): surface is wrong size for layer, surface = {d}x{d}, layer = {d}x{d}",
-            .{ surface.getWidth(), surface.getHeight(), width, height },
-        );
-
         // On iOS, try to correct the contentsScale instead of discarding.
         if (comptime builtin.os.tag == .ios) {
             const bw = bounds.size.width;
@@ -151,9 +125,6 @@ fn setSurfaceCallback(
     }
 
     layer.setProperty("contents", surface);
-    if (comptime builtin.os.tag == .ios) {
-        log.info("setSurfaceCallback: contents set", .{});
-    }
 }
 
 pub const DisplayCallback = ?*align(8) const fn (?*anyopaque) void;
