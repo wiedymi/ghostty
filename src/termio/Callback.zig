@@ -13,7 +13,10 @@ const log = std.log.scoped(.io_callback);
 
 /// The callback function type for writing data.
 /// This is called when the terminal wants to send data (e.g., keyboard input).
-/// The userdata is passed through from the config.
+///
+/// IMPORTANT: The userdata pointer must remain valid for the lifetime of the
+/// surface. The caller is responsible for ensuring userdata outlives the
+/// surface and is not freed while the callback may still be invoked.
 pub const WriteFn = *const fn (
     userdata: ?*anyopaque,
     data: [*]const u8,
@@ -110,8 +113,8 @@ pub fn queueWrite(
         return;
     }
 
-    // Slow path: need to convert \r to \r\n
-    // For simplicity, we allocate a temporary buffer
+    // Slow path: need to convert \r to \r\n by iterating and
+    // making multiple callback invocations.
     var i: usize = 0;
     while (i < data.len) {
         // Find the next \r or end of data
