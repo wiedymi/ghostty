@@ -96,11 +96,6 @@ extension Ghostty {
                 }
             }
             sizeDidChange(bounds.size)
-
-            if let surface = surface {
-                ghostty_surface_refresh(surface)
-                ghostty_surface_draw(surface)
-            }
         }
     }
 }
