@@ -10,7 +10,6 @@ const macos = @import("macos");
 
 const IOSurface = macos.iosurface.IOSurface;
 
-
 /// We subclass CALayer with a custom display handler, we only need
 /// to make the subclass once, and then we can use it as a singleton.
 var Subclass: ?objc.Class = null;
