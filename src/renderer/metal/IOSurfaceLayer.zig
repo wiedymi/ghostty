@@ -9,6 +9,7 @@ const objc = @import("objc");
 const macos = @import("macos");
 
 const IOSurface = macos.iosurface.IOSurface;
+const log = std.log.scoped(.iosurface_layer);
 
 /// We subclass CALayer with a custom display handler, we only need
 /// to make the subclass once, and then we can use it as a singleton.
@@ -107,16 +108,38 @@ fn setSurfaceCallback(
     const scale = layer.getProperty(f64, "contentsScale");
     const width: usize = @intFromFloat(bounds.size.width * scale);
     const height: usize = @intFromFloat(bounds.size.height * scale);
-    if (width != surface.getWidth() or height != surface.getHeight()) {
+    const surface_width = surface.getWidth();
+    const surface_height = surface.getHeight();
+    const diff_w: usize = if (width > surface_width) width - surface_width else surface_width - width;
+    const diff_h: usize = if (height > surface_height) height - surface_height else surface_height - height;
+    const tolerance: usize = if (comptime builtin.os.tag == .ios) 1 else 0;
+    if (diff_w > tolerance or diff_h > tolerance) {
+        log.warn(
+            "IOSurface size mismatch bounds=({d:.2},{d:.2}) scale={d:.3} layer_px=({d}x{d}) surface_px=({d}x{d}) diff=({d},{d})",
+            .{
+                bounds.size.width,
+                bounds.size.height,
+                scale,
+                width,
+                height,
+                surface_width,
+                surface_height,
+                diff_w,
+                diff_h,
+            },
+        );
         // On iOS, try to correct the contentsScale instead of discarding.
         if (comptime builtin.os.tag == .ios) {
             const bw = bounds.size.width;
             const bh = bounds.size.height;
             if (bw > 0 and bh > 0) {
-                const sx: f64 = @as(f64, @floatFromInt(surface.getWidth())) / bw;
-                const sy: f64 = @as(f64, @floatFromInt(surface.getHeight())) / bh;
+                const sx: f64 = @as(f64, @floatFromInt(surface_width)) / bw;
+                const sy: f64 = @as(f64, @floatFromInt(surface_height)) / bh;
                 const new_scale: f64 = if (sx > sy) sx else sy;
-                layer.setProperty("contentsScale", new_scale);
+                if (@abs(new_scale - scale) > 0.01) {
+                    log.info("adjusting contentsScale from {d:.3} to {d:.3}", .{ scale, new_scale });
+                    layer.setProperty("contentsScale", new_scale);
+                }
             }
         } else {
             return;
