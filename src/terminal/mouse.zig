@@ -75,13 +75,10 @@ pub const Shape = enum(c_int) {
     }
 
     /// Make this a valid gobject if we're in a GTK environment.
-    pub const getGObjectType = gtk: {
-        switch (build_options.artifact) {
-            .ghostty => {},
-            .lib => break :gtk void,
-        }
-
-        break :gtk switch (@import("../build_config.zig").app_runtime) {
+    pub const getGObjectType = if (build_options.artifact == .lib)
+        void
+    else
+        switch (@import("../build_config.zig").app_runtime) {
             .gtk => @import("gobject").ext.defineEnum(
                 Shape,
                 .{ .name = "GhosttyMouseShape" },

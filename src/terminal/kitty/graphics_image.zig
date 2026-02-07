@@ -8,7 +8,7 @@ const posix = std.posix;
 const fastmem = @import("../../fastmem.zig");
 const command = @import("graphics_command.zig");
 const PageList = @import("../PageList.zig");
-const wuffs = @import("wuffs");
+const wuffs = if (builtin.target.os.tag == .freestanding) struct {} else @import("wuffs");
 
 const temp_dir = struct {
     const TempDir = @import("../../os/TempDir.zig");
@@ -17,6 +17,30 @@ const temp_dir = struct {
 };
 
 const log = std.log.scoped(.kitty_gfx);
+pub const Timestamp = if (builtin.target.cpu.arch.isWasm()) u64 else std.time.Instant;
+var wasm_timestamp_counter: u64 = 1;
+const path_max_bytes = if (builtin.target.os.tag == .freestanding) 4096 else std.fs.max_path_bytes;
+
+fn nowTimestamp() !Timestamp {
+    if (comptime builtin.target.cpu.arch.isWasm()) {
+        defer wasm_timestamp_counter +%= 1;
+        return wasm_timestamp_counter;
+    }
+    return std.time.Instant.now();
+}
+
+fn parsePngDimensions(data: []const u8) ?struct { width: u32, height: u32 } {
+    const signature = [_]u8{ 137, 80, 78, 71, 13, 10, 26, 10 };
+    if (data.len < 24) return null;
+    if (!std.mem.eql(u8, data[0..8], &signature)) return null;
+    if (!std.mem.eql(u8, data[12..16], "IHDR")) return null;
+
+    const width = std.mem.readInt(u32, data[16..20], .big);
+    const height = std.mem.readInt(u32, data[20..24], .big);
+    if (width == 0 or height == 0) return null;
+
+    return .{ .width = width, .height = height };
+}
 
 /// Maximum width or height of an image. Taken directly from Kitty.
 const max_dimension = 10000;
@@ -72,6 +96,10 @@ pub const LoadingImage = struct {
             return result;
         }
 
+        if (comptime builtin.target.os.tag == .freestanding) {
+            return error.UnsupportedMedium;
+        }
+
         // Otherwise, the payload data is guaranteed to be a path.
 
         if (comptime builtin.os.tag != .windows) {
@@ -83,7 +111,7 @@ pub const LoadingImage = struct {
             }
         }
 
-        var abs_buf: [std.fs.max_path_bytes]u8 = undefined;
+        var abs_buf: [path_max_bytes]u8 = undefined;
         const path = switch (t.medium) {
             .direct => unreachable, // handled above
             .file, .temporary_file => posix.realpath(cmd.data, &abs_buf) catch |err| {
@@ -111,19 +139,15 @@ pub const LoadingImage = struct {
         t: command.Transmission,
         path: []const u8,
     ) !void {
-        // windows is currently unsupported, does it support shm?
-        if (comptime builtin.target.os.tag == .windows) {
+        if (comptime builtin.target.os.tag == .windows or
+            builtin.target.os.tag == .freestanding or
+            !builtin.link_libc)
+        {
             return error.UnsupportedMedium;
         }
-
-        // libc is required for shm_open
-        if (comptime !builtin.link_libc) {
-            return error.UnsupportedMedium;
-        }
-
         // Since we're only supporting posix then max_path_bytes should
         // be enough to stack allocate the path.
-        var buf: [std.fs.max_path_bytes]u8 = undefined;
+        var buf: [path_max_bytes]u8 = undefined;
         const pathz = std.fmt.bufPrintZ(&buf, "{s}", .{path}) catch return error.InvalidData;
 
         const fd = std.c.shm_open(pathz, @as(c_int, @bitCast(std.c.O{ .ACCMODE = .RDONLY })), 0);
@@ -206,6 +230,10 @@ pub const LoadingImage = struct {
         t: command.Transmission,
         path: []const u8,
     ) !void {
+        if (comptime builtin.target.os.tag == .freestanding) {
+            return error.UnsupportedMedium;
+        }
+
         switch (medium) {
             .file, .temporary_file => {},
             else => @compileError("readFile only supports file and temporary_file"),
@@ -287,10 +315,12 @@ pub const LoadingImage = struct {
 
             // The temporary dir is sometimes a symlink. On macOS for
             // example /tmp is /private/var/...
-            var buf: [std.fs.max_path_bytes]u8 = undefined;
-            if (posix.realpath(dir, &buf)) |real_dir| {
-                if (std.mem.startsWith(u8, path, real_dir)) return true;
-            } else |_| {}
+            if (comptime builtin.target.os.tag != .freestanding) {
+                var buf: [path_max_bytes]u8 = undefined;
+                if (posix.realpath(dir, &buf)) |real_dir| {
+                    if (std.mem.startsWith(u8, path, real_dir)) return true;
+                } else |_| {}
+            }
         }
 
         return false;
@@ -334,28 +364,42 @@ pub const LoadingImage = struct {
         // Decompress the data if it is compressed.
         try self.decompress(alloc);
 
-        // Decode the png if we have to
-        if (img.format == .png) try self.decodePng(alloc);
+        // Decode the PNG if possible. On freestanding/wasm targets we keep
+        // the encoded PNG payload and defer decode to the host renderer, but
+        // we still parse the header so placement sizing works.
+        if (img.format == .png) {
+            if (comptime builtin.target.os.tag == .freestanding) {
+                if (img.width == 0 or img.height == 0) {
+                    const dims = parsePngDimensions(self.data.items) orelse return error.InvalidData;
+                    img.width = dims.width;
+                    img.height = dims.height;
+                }
+            } else {
+                try self.decodePng(alloc);
+            }
+        }
 
         // Validate our dimensions.
         if (img.width == 0 or img.height == 0) return error.DimensionsRequired;
         if (img.width > max_dimension or img.height > max_dimension) return error.DimensionsTooLarge;
 
-        // Data length must be what we expect
-        const bpp = img.format.bpp();
-        const expected_len = img.width * img.height * bpp;
-        const actual_len = self.data.items.len;
-        if (actual_len != expected_len) {
-            std.log.warn(
-                "unexpected length image id={} width={} height={} bpp={} expected_len={} actual_len={}",
-                .{ img.id, img.width, img.height, bpp, expected_len, actual_len },
-            );
-            return error.InvalidData;
+        // Data length must be what we expect for raw formats.
+        if (img.format != .png) {
+            const bpp = img.format.bpp();
+            const expected_len = img.width * img.height * bpp;
+            const actual_len = self.data.items.len;
+            if (actual_len != expected_len) {
+                std.log.warn(
+                    "unexpected length image id={} width={} height={} bpp={} expected_len={} actual_len={}",
+                    .{ img.id, img.width, img.height, bpp, expected_len, actual_len },
+                );
+                return error.InvalidData;
+            }
         }
 
         // Set our time
-        self.image.transmit_time = std.time.Instant.now() catch |err| {
-            log.warn("failed to get time: {}", .{err});
+        self.image.transmit_time = nowTimestamp() catch |err| {
+            log.warn("failed to get transmit timestamp: {}", .{err});
             return error.InternalError;
         };
 
@@ -425,6 +469,7 @@ pub const LoadingImage = struct {
     /// Decode the data as PNG. This will also updated the image dimensions.
     fn decodePng(self: *LoadingImage, alloc: Allocator) !void {
         assert(self.image.format == .png);
+        if (comptime builtin.target.os.tag == .freestanding) return error.UnsupportedFormat;
 
         const result = wuffs.png.decode(
             alloc,
@@ -463,7 +508,7 @@ pub const Image = struct {
     format: command.Transmission.Format = .rgb,
     compression: command.Transmission.Compression = .none,
     data: []const u8 = "",
-    transmit_time: std.time.Instant = undefined,
+    transmit_time: Timestamp = 0,
 
     /// Set this to true if this image was loaded by a command that
     /// doesn't specify an ID or number, since such commands should
@@ -705,7 +750,7 @@ test "image load: temporary file without correct path" {
         .data = data,
     });
 
-    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    var buf: [path_max_bytes]u8 = undefined;
     const path = try tmp_dir.dir.realpath("image.data", &buf);
 
     var cmd: command.Command = .{
@@ -738,7 +783,7 @@ test "image load: rgb, not compressed, temporary file" {
         .data = data,
     });
 
-    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    var buf: [path_max_bytes]u8 = undefined;
     const path = try tmp_dir.dir.realpath("tty-graphics-protocol-image.data", &buf);
 
     var cmd: command.Command = .{
@@ -775,7 +820,7 @@ test "image load: rgb, not compressed, regular file" {
         .data = data,
     });
 
-    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    var buf: [path_max_bytes]u8 = undefined;
     const path = try tmp_dir.dir.realpath("image.data", &buf);
 
     var cmd: command.Command = .{
@@ -810,7 +855,7 @@ test "image load: png, not compressed, regular file" {
         .data = data,
     });
 
-    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    var buf: [path_max_bytes]u8 = undefined;
     const path = try tmp_dir.dir.realpath("tty-graphics-protocol-image.data", &buf);
 
     var cmd: command.Command = .{

@@ -9,7 +9,10 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const font = @import("font/main.zig");
+const font = if (builtin.target.cpu.arch.isWasm())
+    struct { pub const Face = opaque {}; }
+else
+    @import("font/main.zig");
 
 /// If true, the default font features should be disabled for the given face.
 pub fn disableDefaultFontFeatures(face: *const font.Face) bool {

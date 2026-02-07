@@ -1,6 +1,25 @@
 const std = @import("std");
 const assert = @import("../quirks.zig").inlineAssert;
-const configpkg = @import("../config.zig");
+const terminal_options = @import("terminal_options");
+const configpkg = if (terminal_options.artifact == .lib)
+    struct {
+        pub const Color = struct {
+            r: u8,
+            g: u8,
+            b: u8,
+
+            pub fn toTerminalRGB(self: Color) color.RGB {
+                return .{ .r = self.r, .g = self.g, .b = self.b };
+            }
+        };
+
+        pub const BoldColor = union(enum) {
+            color: Color,
+            bright,
+        };
+    }
+else
+    @import("../config.zig");
 const color = @import("color.zig");
 const sgr = @import("sgr.zig");
 const page = @import("page.zig");

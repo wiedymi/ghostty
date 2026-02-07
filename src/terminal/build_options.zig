@@ -42,7 +42,9 @@ pub const Options = struct {
         opts.addOption(bool, "slow_runtime_safety", self.slow_runtime_safety);
 
         // These are synthesized based on other options.
-        opts.addOption(bool, "kitty_graphics", self.oniguruma);
+        // kitty_graphics is intentionally independent from Oniguruma so
+        // wasm/lib-vt builds can keep Kitty image protocol support enabled.
+        opts.addOption(bool, "kitty_graphics", true);
         opts.addOption(bool, "tmux_control_mode", self.oniguruma);
 
         m.addOptions("terminal_options", opts);
