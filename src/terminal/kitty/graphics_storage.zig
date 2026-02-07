@@ -11,10 +11,18 @@ const PageList = @import("../PageList.zig");
 const Screen = @import("../Screen.zig");
 const LoadingImage = @import("graphics_image.zig").LoadingImage;
 const Image = @import("graphics_image.zig").Image;
+const Timestamp = @import("graphics_image.zig").Timestamp;
 const Rect = @import("graphics_image.zig").Rect;
 const Command = command.Command;
 
 const log = std.log.scoped(.kitty_gfx);
+
+fn timestampOrder(lhs: Timestamp, rhs: Timestamp) std.math.Order {
+    return switch (@typeInfo(Timestamp)) {
+        .int, .comptime_int => std.math.order(lhs, rhs),
+        else => lhs.order(rhs),
+    };
+}
 
 /// An image storage is associated with a terminal screen (i.e. main
 /// screen, alt screen) and contains all the transmitted images and
@@ -203,7 +211,7 @@ pub const ImageStorage = struct {
         while (it.next()) |kv| {
             if (kv.value_ptr.number == image_number) {
                 if (newest == null or
-                    kv.value_ptr.transmit_time.order(newest.?.transmit_time) == .gt)
+                    timestampOrder(kv.value_ptr.transmit_time, newest.?.transmit_time) == .gt)
                 {
                     newest = kv.value_ptr.*;
                 }
@@ -522,7 +530,7 @@ pub const ImageStorage = struct {
         // bit is fine compared to the megabytes we're looking to save.
         const Candidate = struct {
             id: u32,
-            time: std.time.Instant,
+            time: Timestamp,
             used: bool,
         };
 
@@ -569,7 +577,7 @@ pub const ImageStorage = struct {
                     _ = ctx;
 
                     // If they're usage matches, then its based on time.
-                    if (lhs.used == rhs.used) return switch (lhs.time.order(rhs.time)) {
+                    if (lhs.used == rhs.used) return switch (timestampOrder(lhs.time, rhs.time)) {
                         .lt => true,
                         .gt => false,
                         .eq => lhs.id < rhs.id,
