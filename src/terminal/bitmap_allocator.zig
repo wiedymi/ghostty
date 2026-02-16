@@ -219,7 +219,7 @@ pub fn BitmapAllocator(comptime chunk_size: comptime_int) type {
             const bitmap_start = 0;
             const bitmap_end = @sizeOf(u64) * bitmap_count;
             const chunks_start = alignForward(usize, bitmap_end, @alignOf(u8));
-            const chunks_end = chunks_start + (aligned_cap * chunk_size);
+            const chunks_end = chunks_start + (aligned_chunk_count * chunk_size);
             const total_size = chunks_end;
 
             return Layout{

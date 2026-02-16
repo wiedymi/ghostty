@@ -3266,26 +3266,61 @@ pub fn increaseCapacity(
 
     log.info("adjusting page capacity={}", .{cap});
 
-    // Create our new page and clone the old page into it.
-    const new_node = try self.createPage(cap);
+    // Create our new page and clone the old page into it. Clone can
+    // fail if another dimension is also exhausted; retry with it doubled.
+    var new_node = try self.createPage(cap);
     errdefer self.destroyNode(new_node);
-    const new_page: *Page = &new_node.data;
+    var new_page: *Page = &new_node.data;
     assert(new_page.capacity.rows >= page.capacity.rows);
     assert(new_page.capacity.cols >= page.capacity.cols);
     new_page.size.rows = page.size.rows;
     new_page.size.cols = page.size.cols;
-    new_page.cloneFrom(
-        page,
-        0,
-        page.size.rows,
-    ) catch |err| {
-        // cloneFrom only errors if there isn't capacity for the data
-        // from the source page but we're only increasing capacity so
-        // this should never be possible. If it happens, we should crash
-        // because we're in no man's land and can't safely recover.
-        log.err("increaseCapacity clone failed err={}", .{err});
-        @panic("unexpected clone failure");
-    };
+    while (true) {
+        new_page.cloneFrom(
+            page,
+            0,
+            page.size.rows,
+        ) catch |err| {
+            const retry_dim: IncreaseCapacity = switch (err) {
+                error.StringAllocOutOfMemory => .string_bytes,
+                error.GraphemeAllocOutOfMemory,
+                error.GraphemeMapOutOfMemory,
+                => .grapheme_bytes,
+                error.HyperlinkSetOutOfMemory,
+                error.HyperlinkSetNeedsRehash,
+                error.HyperlinkMapOutOfMemory,
+                => .hyperlink_bytes,
+                error.StyleSetOutOfMemory,
+                error.StyleSetNeedsRehash,
+                => .styles,
+            };
+
+            switch (retry_dim) {
+                inline else => |tag| {
+                    const field_name = @tagName(tag);
+                    const Int = @FieldType(Capacity, field_name);
+                    const old = @field(cap, field_name);
+                    const new = std.math.mul(Int, old, 2) catch overflow: {
+                        if (old < std.math.maxInt(Int)) break :overflow std.math.maxInt(Int);
+                        return error.OutOfSpace;
+                    };
+                    @field(cap, field_name) = new;
+                },
+            }
+
+            const layout = Page.layout(cap);
+            if (layout.total_size > size.max_page_size) {
+                return error.OutOfSpace;
+            }
+            self.destroyNode(new_node);
+            new_node = try self.createPage(cap);
+            new_page = &new_node.data;
+            new_page.size.rows = page.size.rows;
+            new_page.size.cols = page.size.cols;
+            continue;
+        };
+        break;
+    }
 
     // Preserve page-level dirty flag (cloneFrom only copies row data)
     new_page.dirty = page.dirty;
