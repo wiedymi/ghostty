@@ -86,11 +86,6 @@ pub const Shape = enum(c_int) {
 
             .none => void,
         };
-    };
-
-    test "ghostty.h MouseShape" {
-        try lib.checkGhosttyHEnum(Shape, "GHOSTTY_MOUSE_SHAPE_");
-    }
 };
 
 const string_map = std.StaticStringMap(Shape).initComptime(.{
@@ -158,6 +153,10 @@ const string_map = std.StaticStringMap(Shape).initComptime(.{
 test "cursor shape from string" {
     const testing = std.testing;
     try testing.expectEqual(Shape.default, Shape.fromString("default").?);
+}
+
+test "ghostty.h MouseShape" {
+    try lib.checkGhosttyHEnum(Shape, "GHOSTTY_MOUSE_SHAPE_");
 }
 
 test {

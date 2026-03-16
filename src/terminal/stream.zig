@@ -2096,10 +2096,21 @@ pub fn Stream(comptime Handler: type) type {
                 },
             };
 
-            self.handler.vt(.configure_charset, .{
+            const VtResult = @TypeOf(self.handler.vt(.configure_charset, .{
                 .slot = slot,
                 .charset = set,
-            });
+            }));
+            if (comptime @typeInfo(VtResult) == .error_union) {
+                self.handler.vt(.configure_charset, .{
+                    .slot = slot,
+                    .charset = set,
+                }) catch {};
+            } else {
+                self.handler.vt(.configure_charset, .{
+                    .slot = slot,
+                    .charset = set,
+                });
+            }
         }
 
         inline fn escDispatch(
