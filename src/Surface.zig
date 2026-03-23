@@ -5988,126 +5988,133 @@ fn writeScreenFile(
     loc: WriteScreenLoc,
     write_screen: input.Binding.Action.WriteScreen,
 ) !void {
-    // Create a temporary directory to store our scrollback.
-    var tmp_dir = try internal_os.TempDir.init();
-    errdefer tmp_dir.deinit();
+    if (comptime builtin.os.tag == .visionos) {
+        return error.Unimplemented;
+    } else {
+        // Create a temporary directory to store our scrollback.
+        var tmp_dir = try internal_os.TempDir.init();
+        errdefer tmp_dir.deinit();
 
-    var filename_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const filename = try std.fmt.bufPrint(
-        &filename_buf,
-        "{s}.{s}",
-        .{
-            @tagName(loc),
-            switch (write_screen.emit) {
-                .plain, .vt => "txt",
-                .html => "html",
+        var filename_buf: [internal_os.max_path_bytes]u8 = undefined;
+        const filename = try std.fmt.bufPrint(
+            &filename_buf,
+            "{s}.{s}",
+            .{
+                @tagName(loc),
+                switch (write_screen.emit) {
+                    .plain, .vt => "txt",
+                    .html => "html",
+                },
             },
-        },
-    );
+        );
 
-    // Open our scrollback file
-    var file = try tmp_dir.dir.createFile(
-        filename,
-        switch (builtin.os.tag) {
-            .windows => .{},
-            else => .{ .mode = 0o600 },
-        },
-    );
-    defer file.close();
-
-    // Screen.dumpString writes byte-by-byte, so buffer it
-    var buf: [4096]u8 = undefined;
-    var file_writer = file.writer(&buf);
-    var buf_writer = &file_writer.interface;
-
-    // Write the scrollback contents. This requires a lock.
-    {
-        self.renderer_state.mutex.lock();
-        defer self.renderer_state.mutex.unlock();
-
-        // We only dump history if we have history. We still keep
-        // the file and write the empty file to the pty so that this
-        // command always works on the primary screen.
-        const pages = &self.io.terminal.screens.active.pages;
-        const sel_: ?terminal.Selection = switch (loc) {
-            .history => history: {
-                // We do not support this for alternate screens
-                // because they don't have scrollback anyways.
-                if (self.io.terminal.screens.active_key == .alternate) {
-                    break :history null;
-                }
-
-                break :history terminal.Selection.init(
-                    pages.getTopLeft(.history),
-                    pages.getBottomRight(.history) orelse
-                        break :history null,
-                    false,
-                );
+        // Open our scrollback file
+        var file = try tmp_dir.dir.createFile(
+            filename,
+            switch (builtin.os.tag) {
+                .windows => .{},
+                else => .{ .mode = 0o600 },
             },
+        );
+        defer file.close();
 
-            .screen => screen: {
-                break :screen terminal.Selection.init(
-                    pages.getTopLeft(.screen),
-                    pages.getBottomRight(.screen) orelse
-                        break :screen null,
-                    false,
-                );
+        // Screen.dumpString writes byte-by-byte, so buffer it
+        var buf: [4096]u8 = undefined;
+        var file_writer = file.writer(&buf);
+        var buf_writer = &file_writer.interface;
+
+        // Write the scrollback contents. This requires a lock.
+        {
+            self.renderer_state.mutex.lock();
+            defer self.renderer_state.mutex.unlock();
+
+            // We only dump history if we have history. We still keep
+            // the file and write the empty file to the pty so that this
+            // command always works on the primary screen.
+            const pages = &self.io.terminal.screens.active.pages;
+            const sel_: ?terminal.Selection = switch (loc) {
+                .history => history: {
+                    // We do not support this for alternate screens
+                    // because they don't have scrollback anyways.
+                    if (self.io.terminal.screens.active_key == .alternate) {
+                        break :history null;
+                    }
+
+                    break :history terminal.Selection.init(
+                        pages.getTopLeft(.history),
+                        pages.getBottomRight(.history) orelse
+                            break :history null,
+                        false,
+                    );
+                },
+
+                .screen => screen: {
+                    break :screen terminal.Selection.init(
+                        pages.getTopLeft(.screen),
+                        pages.getBottomRight(.screen) orelse
+                            break :screen null,
+                        false,
+                    );
+                },
+
+                .selection => self.io.terminal.screens.active.selection,
+            };
+
+            const sel = sel_ orelse {
+                // If we have no selection we have no data so we do nothing.
+                tmp_dir.deinit();
+                return;
+            };
+
+            const ScreenFormatter = terminal.formatter.ScreenFormatter;
+            var formatter: ScreenFormatter = .init(
+                self.io.terminal.screens.active,
+                .{
+                    .emit = switch (write_screen.emit) {
+                        .plain => .plain,
+                        .vt => .vt,
+                        .html => .html,
+                    },
+                    .unwrap = true,
+                    .trim = false,
+                    .background = self.io.terminal.colors.background.get(),
+                    .foreground = self.io.terminal.colors.foreground.get(),
+                    .palette = &self.io.terminal.colors.palette.current,
+                },
+            );
+            formatter.content = .{ .selection = sel.ordered(
+                self.io.terminal.screens.active,
+                .forward,
+            ) };
+            try formatter.format(buf_writer);
+        }
+        try buf_writer.flush();
+
+        // Get the final path
+        var path_buf: [internal_os.max_path_bytes]u8 = undefined;
+        const path = try tmp_dir.dir.realpath(filename, &path_buf);
+
+        switch (write_screen.action) {
+            .copy => {
+                const pathZ = try self.alloc.dupeZ(u8, path);
+                defer self.alloc.free(pathZ);
+                try self.rt_surface.setClipboard(.standard, &.{.{
+                    .mime = "text/plain",
+                    .data = pathZ,
+                }}, false);
             },
-
-            .selection => self.io.terminal.screens.active.selection,
-        };
-
-        const sel = sel_ orelse {
-            // If we have no selection we have no data so we do nothing.
-            tmp_dir.deinit();
-            return;
-        };
-
-        const ScreenFormatter = terminal.formatter.ScreenFormatter;
-        var formatter: ScreenFormatter = .init(self.io.terminal.screens.active, .{
-            .emit = switch (write_screen.emit) {
-                .plain => .plain,
-                .vt => .vt,
-                .html => .html,
-            },
-            .unwrap = true,
-            .trim = false,
-            .background = self.io.terminal.colors.background.get(),
-            .foreground = self.io.terminal.colors.foreground.get(),
-            .palette = &self.io.terminal.colors.palette.current,
-        });
-        formatter.content = .{ .selection = sel.ordered(
-            self.io.terminal.screens.active,
-            .forward,
-        ) };
-        try formatter.format(buf_writer);
-    }
-    try buf_writer.flush();
-
-    // Get the final path
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const path = try tmp_dir.dir.realpath(filename, &path_buf);
-
-    switch (write_screen.action) {
-        .copy => {
-            const pathZ = try self.alloc.dupeZ(u8, path);
-            defer self.alloc.free(pathZ);
-            try self.rt_surface.setClipboard(.standard, &.{.{
-                .mime = "text/plain",
-                .data = pathZ,
-            }}, false);
-        },
-        .open => try self.openUrl(.{
-            .kind = switch (write_screen.emit) {
-                .plain, .vt => .text,
-                .html => .html,
-            },
-            .url = path,
-        }),
-        .paste => self.queueIo(try termio.Message.writeReq(
-            self.alloc,
-            path,
-        ), .unlocked),
+            .open => try self.openUrl(.{
+                .kind = switch (write_screen.emit) {
+                    .plain, .vt => .text,
+                    .html => .html,
+                },
+                .url = path,
+            }),
+            .paste => self.queueIo(try termio.Message.writeReq(
+                self.alloc,
+                path,
+            ), .unlocked),
+        }
     }
 }
 
