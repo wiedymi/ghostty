@@ -585,6 +585,13 @@ pub fn osVersionMin(tag: std.Target.Os.Tag) ?std.Target.Query.OsVersion {
             .patch = 0,
         } },
 
+        // visionOS 1 is the earliest public release.
+        .visionos => .{ .semver = .{
+            .major = 1,
+            .minor = 0,
+            .patch = 0,
+        } },
+
         // This should never happen currently. If we add a new target then
         // we should add a new case here.
         else => null,

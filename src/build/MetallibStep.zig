@@ -30,6 +30,10 @@ pub fn create(b: *std.Build, opts: Options) ?*MetallibStep {
             .simulator => "iphoneos",
             else => "iphoneos",
         },
+        .visionos => switch (opts.target.result.abi) {
+            .simulator => "xrsimulator",
+            else => "xros",
+        },
         else => return null,
     };
     const platform_version_arg = switch (opts.target.result.os.tag) {
@@ -38,6 +42,7 @@ pub fn create(b: *std.Build, opts: Options) ?*MetallibStep {
             .simulator => "-mios-simulator-version-min",
             else => "-mios-version-min",
         },
+        .visionos => "-mtargetos",
         else => null,
     };
 
@@ -48,6 +53,7 @@ pub fn create(b: *std.Build, opts: Options) ?*MetallibStep {
     else switch (opts.target.result.os.tag) {
         .macos => "10.14",
         .ios => "11.0",
+        .visionos => "xros1.0",
         else => unreachable,
     };
 
@@ -60,10 +66,24 @@ pub fn create(b: *std.Build, opts: Options) ?*MetallibStep {
     run_ir.addArgs(&.{"-c"});
     for (opts.sources) |source| run_ir.addFileArg(source);
     if (platform_version_arg) |arg| {
-        run_ir.addArgs(&.{b.fmt(
-            "{s}={s}",
-            .{ arg, min_version },
-        )});
+        const version_arg = switch (opts.target.result.os.tag) {
+            .visionos => b.fmt(
+                "{s}=xros{s}{s}",
+                .{
+                    arg,
+                    min_version,
+                    if (opts.target.result.abi == .simulator)
+                        "-simulator"
+                    else
+                        "",
+                },
+            ),
+            else => b.fmt(
+                "{s}={s}",
+                .{ arg, min_version },
+            ),
+        };
+        run_ir.addArg(version_arg);
     }
 
     const run_lib = RunStep.create(
