@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
+const path_max_bytes = @import("path_max.zig").bytes;
 
 pub const ResourcesDir = struct {
     /// Avoid accessing these directly, use the app() and host() methods instead.
@@ -38,6 +39,10 @@ pub const ResourcesDir = struct {
 /// This is highly Ghostty-specific and can likely be generalized at
 /// some point but we can cross that bridge if we ever need to.
 pub fn resourcesDir(alloc: Allocator) !ResourcesDir {
+    if (comptime builtin.target.os.tag == .visionos) {
+        return .{};
+    }
+
     // Use the GHOSTTY_RESOURCES_DIR environment variable in release builds.
     //
     // In debug builds we try using terminfo detection first instead, since
@@ -66,12 +71,12 @@ pub fn resourcesDir(alloc: Allocator) !ResourcesDir {
     };
 
     // Get the path to our running binary
-    var exe_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var exe_buf: [path_max_bytes]u8 = undefined;
     var exe: []const u8 = std.fs.selfExePath(&exe_buf) catch return .{};
 
     // We have an exe path! Climb the tree looking for the terminfo
     // bundle as we expect it.
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [path_max_bytes]u8 = undefined;
     while (std.fs.path.dirname(exe)) |dir| {
         exe = dir;
 

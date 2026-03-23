@@ -24,6 +24,7 @@ pub const cgroup = @import("cgroup.zig");
 pub const hostname = @import("hostname.zig");
 pub const i18n = @import("i18n.zig");
 pub const mach = @import("mach.zig");
+pub const max_path_bytes = @import("path_max.zig").bytes;
 pub const path = @import("path.zig");
 pub const passwd = @import("passwd.zig");
 pub const xdg = @import("xdg.zig");

@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const testing = std.testing;
+const path_max_bytes = @import("path_max.zig").bytes;
 
 /// Search for "cmd" in the PATH and return the absolute path. This will
 /// always allocate if there is a non-null result. The caller must free the
@@ -23,7 +24,7 @@ pub fn expand(alloc: Allocator, cmd: []const u8) !?[]u8 {
     };
     defer if (builtin.os.tag == .windows) alloc.free(PATH);
 
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var path_buf: [path_max_bytes]u8 = undefined;
     var it = std.mem.tokenizeScalar(u8, PATH, std.fs.path.delimiter);
     var seen_eacces = false;
     while (it.next()) |search_path| {

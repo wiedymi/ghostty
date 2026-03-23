@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const passwd = @import("passwd.zig");
 const posix = std.posix;
 const objc = @import("objc");
+const path_max_bytes = @import("path_max.zig").bytes;
 
 const Error = error{
     /// The buffer used for output is not large enough to store the value.
@@ -16,8 +17,8 @@ pub inline fn home(buf: []u8) !?[]const u8 {
         .linux, .freebsd, .macos => try homeUnix(buf),
         .windows => try homeWindows(buf),
 
-        // iOS doesn't have a user-writable home directory
-        .ios => null,
+        // iOS-family targets don't have a user-writable home directory
+        .ios, .visionos => null,
 
         else => @compileError("unimplemented"),
     };
@@ -126,8 +127,8 @@ pub fn expandHome(path: []const u8, buf: []u8) ExpandError![]const u8 {
         // `~/` is not an idiom generally used on Windows
         .windows => return path,
 
-        // iOS doesn't have a user-writable home directory
-        .ios => return path,
+        // iOS-family targets don't have a user-writable home directory
+        .ios, .visionos => return path,
 
         else => @compileError("unimplemented"),
     };
@@ -151,7 +152,7 @@ fn expandHomeUnix(path: []const u8, buf: []u8) ExpandError![]const u8 {
 test "expandHomeUnix" {
     const testing = std.testing;
     const allocator = testing.allocator;
-    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    var buf: [path_max_bytes]u8 = undefined;
     const home_dir = try expandHomeUnix("~/", &buf);
     // Joining the home directory `~` with the path `/`
     // the result should end with a separator here. (e.g. `/home/user/`)

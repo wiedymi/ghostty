@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const build_config = @import("../build_config.zig");
 const locales = @import("i18n_locales.zig");
+const path_max_bytes = @import("path_max.zig").bytes;
 
 const log = std.log.scoped(.i18n);
 
@@ -39,7 +40,7 @@ pub fn init(resources_dir: []const u8) InitError!void {
                 return error.InvalidResourcesDir;
 
             // Build our locale path
-            var buf: [std.fs.max_path_bytes]u8 = undefined;
+            var buf: [path_max_bytes]u8 = undefined;
             const path = std.fmt.bufPrintZ(&buf, "{s}/locale", .{share_dir}) catch
                 return error.OutOfMemory;
 

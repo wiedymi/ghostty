@@ -60,8 +60,8 @@ pub fn launchedFromDesktop() bool {
         // TODO: This should have some logic to detect this. Perhaps std.builtin.subsystem
         .windows => false,
 
-        // iPhone/iPad is always launched from the "desktop"
-        .ios => true,
+        // iPhone/iPad/visionOS is always launched from the "desktop"
+        .ios, .visionos => true,
 
         else => @compileError("unsupported platform"),
     };
@@ -83,6 +83,7 @@ pub const DesktopEnvironment = enum {
 pub fn desktopEnvironment() DesktopEnvironment {
     return switch (comptime builtin.os.tag) {
         .macos => .macos,
+        .ios, .visionos => .other,
         .windows => .windows,
         .linux, .freebsd => de: {
             if (@inComptime()) @compileError("Checking for the desktop environment on Linux/BSD must be done at runtime.");
