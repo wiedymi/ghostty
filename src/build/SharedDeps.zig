@@ -98,7 +98,8 @@ fn initTarget(
         else => false,
     };
     config.i18n = config.i18n and switch (target.result.os.tag) {
-        .macos, .ios, .linux, .freebsd => true,
+        .macos, .ios => true,
+        .linux, .freebsd => target.result.isGnuLibC(),
         else => false,
     };
     self.config = config;
