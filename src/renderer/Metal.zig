@@ -63,7 +63,7 @@ autorelease_pool: ?*objc.AutoreleasePool = null,
 
 pub fn init(alloc: Allocator, opts: rendererpkg.Options) !Metal {
     comptime switch (builtin.os.tag) {
-        .macos, .ios => {},
+        .macos, .ios, .visionos => {},
         else => @compileError("unsupported platform for Metal"),
     };
 
@@ -78,7 +78,7 @@ pub fn init(alloc: Allocator, opts: rendererpkg.Options) !Metal {
     // Grab metadata about the device.
     const default_storage_mode: mtl.MTLResourceOptions.StorageMode = switch (comptime builtin.os.tag) {
         // manage mode is not supported by iOS
-        .ios => .shared,
+        .ios, .visionos => .shared,
         else => if (device.getProperty(bool, "hasUnifiedMemory")) .shared else .managed,
     };
     const max_texture_size = queryMaxTextureSize(device);
@@ -125,7 +125,7 @@ pub fn init(alloc: Allocator, opts: rendererpkg.Options) !Metal {
             info.view.setProperty("wantsLayer", true);
         },
 
-        .ios => {
+        .ios, .visionos => {
             const view_layer = objc.Object.fromId(info.view.getProperty(?*anyopaque, "layer"));
             view_layer.msgSend(void, objc.sel("addSublayer:"), .{layer.layer.value});
         },
@@ -172,7 +172,7 @@ pub fn loopEnter(self: *Metal) void {
     // backing layer. This means we need to explicitly trigger the first
     // display after setting up the callback, since the bounds were already
     // set before the callback was registered.
-    if (comptime builtin.os.tag == .ios) {
+    if (comptime builtin.os.tag == .ios or builtin.os.tag == .visionos) {
         self.layer.layer.msgSend(void, objc.sel("setNeedsDisplay"), .{});
     }
 }
@@ -261,7 +261,7 @@ pub fn initTarget(self: *const Metal, width: usize, height: usize) !Target {
 pub inline fn present(self: *Metal, target: Target, sync: bool) !void {
     // On iOS, always go through setSurface so we stay on the main thread.
     // setSurface will synchronously update if already on the main thread.
-    if (comptime builtin.os.tag == .ios) {
+    if (comptime builtin.os.tag == .ios or builtin.os.tag == .visionos) {
         try self.layer.setSurface(target.surface);
         return;
     }
@@ -442,7 +442,7 @@ fn chooseDevice() error{NoMetalDevice}!objc.Object {
                     device.getProperty(bool, "isLowPower")) break;
             }
         },
-        .ios => {
+        .ios, .visionos => {
             chosen_device = objc.Object.fromId(mtl.MTLCreateSystemDefaultDevice());
         },
         else => @compileError("unsupported target for Metal"),

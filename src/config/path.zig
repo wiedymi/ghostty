@@ -7,6 +7,10 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 const cli = @import("../cli.zig");
 const internal_os = @import("../os/main.zig");
 const formatterpkg = @import("formatter.zig");
+const path_max_bytes = if (builtin.os.tag == .visionos)
+    4096
+else
+    std.fs.max_path_bytes;
 
 const log = std.log.scoped(.config);
 
@@ -94,7 +98,7 @@ pub const Path = union(enum) {
 
     /// Used by formatter.
     pub fn formatEntry(self: *const Path, formatter: formatterpkg.EntryFormatter) !void {
-        var buf: [std.fs.max_path_bytes + 1]u8 = undefined;
+        var buf: [path_max_bytes + 1]u8 = undefined;
         const value = switch (self.*) {
             .optional => |path| std.fmt.bufPrint(
                 &buf,
@@ -154,7 +158,7 @@ pub const Path = union(enum) {
 
         // If it isn't absolute, we need to make it absolute relative
         // to the base.
-        var buf: [std.fs.max_path_bytes]u8 = undefined;
+        var buf: [path_max_bytes]u8 = undefined;
 
         // Check if the path starts with a tilde and expand it to the
         // home directory on Linux/macOS. We explicitly look for "~/"
@@ -195,33 +199,49 @@ pub const Path = union(enum) {
             return;
         }
 
-        var dir = try std.fs.openDirAbsolute(base, .{});
-        defer dir.close();
+        const abs = if (comptime builtin.os.tag == .visionos)
+            std.fs.path.resolve(arena_alloc, &.{ base, path }) catch |err| {
+                try diags.append(arena_alloc, .{
+                    .message = try std.fmt.allocPrintSentinel(
+                        arena_alloc,
+                        "error resolving file path {s}: {}",
+                        .{ path, err },
+                        0,
+                    ),
+                });
 
-        const abs = dir.realpath(path, &buf) catch |err| abs: {
-            if (err == error.FileNotFound) {
-                // The file doesn't exist. Try to resolve the relative path
-                // another way.
-                const resolved = try std.fs.path.resolve(arena_alloc, &.{ base, path });
-                defer arena_alloc.free(resolved);
-                @memcpy(buf[0..resolved.len], resolved);
-                break :abs buf[0..resolved.len];
+                self.* = .{ .required = "" };
+                return;
             }
+        else blk: {
+            var dir = try std.fs.openDirAbsolute(base, .{});
+            defer dir.close();
 
-            try diags.append(arena_alloc, .{
-                .message = try std.fmt.allocPrintSentinel(
-                    arena_alloc,
-                    "error resolving file path {s}: {}",
-                    .{ path, err },
-                    0,
-                ),
-            });
+            break :blk dir.realpath(path, &buf) catch |err| abs: {
+                if (err == error.FileNotFound) {
+                    const resolved = try std.fs.path.resolve(
+                        arena_alloc,
+                        &.{ base, path },
+                    );
+                    defer arena_alloc.free(resolved);
+                    @memcpy(buf[0..resolved.len], resolved);
+                    break :abs buf[0..resolved.len];
+                }
 
-            // Blank this path so that we don't attempt to resolve it again
-            self.* = .{ .required = "" };
+                try diags.append(arena_alloc, .{
+                    .message = try std.fmt.allocPrintSentinel(
+                        arena_alloc,
+                        "error resolving file path {s}: {}",
+                        .{ path, err },
+                        0,
+                    ),
+                });
 
-            return;
+                self.* = .{ .required = "" };
+                return;
+            };
         };
+        defer if (comptime builtin.os.tag == .visionos) arena_alloc.free(abs);
 
         log.debug(
             "expanding file path relative={s} abs={s}",
@@ -229,7 +249,10 @@ pub const Path = union(enum) {
         );
 
         switch (self.*) {
-            .optional, .required => |*p| p.* = try arena_alloc.dupeZ(u8, abs),
+            .optional, .required => |*p| p.* = try arena_alloc.dupeZ(
+                u8,
+                abs,
+            ),
         }
     }
 
@@ -404,7 +427,7 @@ pub const RepeatablePath = struct {
             return;
         }
 
-        var buf: [std.fs.max_path_bytes + 1]u8 = undefined;
+        var buf: [path_max_bytes + 1]u8 = undefined;
         for (self.value.items) |item| {
             const value = switch (item) {
                 .optional => |path| std.fmt.bufPrint(

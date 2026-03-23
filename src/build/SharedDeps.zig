@@ -93,6 +93,15 @@ fn initTarget(
     const config = try b.allocator.create(Config);
     config.* = self.config.*;
     config.target = target;
+    config.sentry = config.sentry and switch (target.result.os.tag) {
+        .macos, .ios => true,
+        else => false,
+    };
+    config.i18n = config.i18n and switch (target.result.os.tag) {
+        .macos, .ios => true,
+        .linux, .freebsd => target.result.isGnuLibC(),
+        else => false,
+    };
     self.config = config;
 
     // Setup our shared build options
@@ -391,7 +400,10 @@ pub fn add(
     if (b.lazyDependency("opengl", .{})) |dep| {
         step.root_module.addImport("opengl", dep.module("opengl"));
     }
-    if (b.lazyDependency("vaxis", .{})) |dep| {
+    if (b.lazyDependency("vaxis", .{
+        .target = target,
+        .optimize = optimize,
+    })) |dep| {
         step.root_module.addImport("vaxis", dep.module("vaxis"));
     }
     if (b.lazyDependency("wuffs", .{

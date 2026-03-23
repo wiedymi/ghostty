@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const assert = @import("../../quirks.zig").inlineAssert;
 const Allocator = std.mem.Allocator;
 
@@ -25,69 +26,75 @@ pub fn execute(
     terminal: *Terminal,
     cmd: *const Command,
 ) ?Response {
-    // If storage is disabled then we disable the full protocol. This means
-    // we don't even respond to queries so the terminal completely acts as
-    // if this feature is not supported.
-    if (!terminal.screens.active.kitty_images.enabled()) {
-        log.debug("kitty graphics requested but disabled", .{});
+    if (comptime builtin.os.tag == .visionos) {
         return null;
-    }
-
-    log.debug("executing kitty graphics command: quiet={} control={}", .{
-        cmd.quiet,
-        cmd.control,
-    });
-
-    // The quiet settings used to control the response. We have to make this
-    // a var because in certain special cases (namely chunked transmissions)
-    // this can change.
-    var quiet = cmd.quiet;
-
-    const resp_: ?Response = switch (cmd.control) {
-        .query => query(alloc, cmd),
-        .display => display(alloc, terminal, cmd),
-        .delete => delete(alloc, terminal, cmd),
-
-        .transmit, .transmit_and_display => resp: {
-            // If we're transmitting, then our `q` setting value is complicated.
-            // The `q` setting inherits the value from the starting command
-            // unless `q` is set >= 1 on this command. If it is, then we save
-            // that as the new `q` setting.
-            const storage = &terminal.screens.active.kitty_images;
-            if (storage.loading) |loading| switch (cmd.quiet) {
-                // q=0 we use whatever the start command value is
-                .no => quiet = loading.quiet,
-
-                // q>=1 we use the new value, but we should already be set to it
-                inline .ok, .failures => |tag| {
-                    assert(quiet == tag);
-                    loading.quiet = tag;
-                },
-            };
-
-            break :resp transmit(alloc, terminal, cmd);
-        },
-
-        .transmit_animation_frame,
-        .control_animation,
-        .compose_animation,
-        => .{ .message = "ERROR: unimplemented action" },
-    };
-
-    // Handle the quiet settings
-    if (resp_) |resp| {
-        if (!resp.ok()) {
-            log.warn("erroneous kitty graphics response: {s}", .{resp.message});
+    } else {
+        // If storage is disabled then we disable the full protocol. This means
+        // we don't even respond to queries so the terminal completely acts as
+        // if this feature is not supported.
+        if (!terminal.screens.active.kitty_images.enabled()) {
+            log.debug("kitty graphics requested but disabled", .{});
+            return null;
         }
 
-        return switch (quiet) {
-            .no => if (resp.empty()) null else resp,
-            .ok => if (resp.ok()) null else resp,
-            .failures => null,
-        };
-    }
+        log.debug("executing kitty graphics command: quiet={} control={}", .{
+            cmd.quiet,
+            cmd.control,
+        });
 
-    return null;
+        // The quiet settings used to control the response. We have to make this
+        // a var because in certain special cases (namely chunked transmissions)
+        // this can change.
+        var quiet = cmd.quiet;
+
+        const resp_: ?Response = switch (cmd.control) {
+            .query => query(alloc, cmd),
+            .display => display(alloc, terminal, cmd),
+            .delete => delete(alloc, terminal, cmd),
+
+            .transmit, .transmit_and_display => resp: {
+                // If we're transmitting, then our `q` setting value is complicated.
+                // The `q` setting inherits the value from the starting command
+                // unless `q` is set >= 1 on this command. If it is, then we save
+                // that as the new `q` setting.
+                const storage = &terminal.screens.active.kitty_images;
+                if (storage.loading) |loading| switch (cmd.quiet) {
+                    // q=0 we use whatever the start command value is
+                    .no => quiet = loading.quiet,
+
+                    // q>=1 we use the new value, but we should already be set to it
+                    inline .ok, .failures => |tag| {
+                        assert(quiet == tag);
+                        loading.quiet = tag;
+                    },
+                };
+
+                break :resp transmit(alloc, terminal, cmd);
+            },
+
+            .transmit_animation_frame,
+            .control_animation,
+            .compose_animation,
+            => .{ .message = "ERROR: unimplemented action" },
+        };
+
+        // Handle the quiet settings
+        if (resp_) |resp| {
+            if (!resp.ok()) {
+                log.warn("erroneous kitty graphics response: {s}", .{
+                    resp.message,
+                });
+            }
+
+            return switch (quiet) {
+                .no => if (resp.empty()) null else resp,
+                .ok => if (resp.ok()) null else resp,
+                .failures => null,
+            };
+        }
+
+        return null;
+    }
 }
 /// Execute a "query" command.
 ///

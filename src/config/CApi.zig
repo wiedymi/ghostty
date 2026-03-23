@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const inputpkg = @import("../input.zig");
 const state = &@import("../global.zig").state;
 const c = @import("../main_c.zig");
@@ -51,9 +52,13 @@ export fn ghostty_config_clone(self: *Config) ?*Config {
 
 /// Load the configuration from the CLI args.
 export fn ghostty_config_load_cli_args(self: *Config) void {
-    self.loadCliArgs(state.alloc) catch |err| {
-        log.err("error loading config err={}", .{err});
-    };
+    if (comptime builtin.os.tag == .visionos) {
+        return;
+    } else {
+        self.loadCliArgs(state.alloc) catch |err| {
+            log.err("error loading config err={}", .{err});
+        };
+    }
 }
 
 /// Load the configuration from the default file locations. This

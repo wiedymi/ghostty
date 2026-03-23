@@ -12,7 +12,8 @@ const assert = @import("quirks.zig").inlineAssert;
 const posix = std.posix;
 const builtin = @import("builtin");
 const build_config = @import("build_config.zig");
-const main = @import("main_ghostty.zig");
+const enable_benchmark_api = !(build_config.artifact == .lib and
+    builtin.os.tag == .visionos);
 const state = &@import("global.zig").state;
 const apprt = @import("apprt.zig");
 const internal_os = @import("os/main.zig");
@@ -27,8 +28,34 @@ comptime {
     }
 }
 
-/// Global options so we can log. This is identical to main.
-pub const std_options = main.std_options;
+fn logFn(
+    comptime level: std.log.Level,
+    comptime scope: @TypeOf(.EnumLiteral),
+    comptime format: []const u8,
+    args: anytype,
+) void {
+    if (comptime builtin.mode != .Debug and level == .debug) return;
+    if (!state.logging.stderr) return;
+
+    var buffer: [256]u8 = undefined;
+    var stderr_writer = std.fs.File.stderr().writer(&buffer);
+    const stderr = &stderr_writer.interface;
+    const level_txt = comptime level.asText();
+    const prefix = if (scope == .default)
+        ": "
+    else
+        "(" ++ @tagName(scope) ++ "): ";
+    stderr.print(level_txt ++ prefix ++ format ++ "\n", args) catch return;
+    stderr.flush() catch return;
+}
+
+pub const std_options: std.Options = .{
+    .log_level = switch (builtin.mode) {
+        .Debug => .debug,
+        else => .info,
+    },
+    .logFn = logFn,
+};
 
 comptime {
     // These structs need to be referenced so the `export` functions
@@ -42,7 +69,9 @@ comptime {
 
     // Our benchmark API. We probably want to gate this on a build
     // config in the future but for now we always just export it.
-    _ = @import("benchmark/main.zig").CApi;
+    if (enable_benchmark_api) {
+        _ = @import("benchmark/main.zig").CApi;
+    }
 }
 
 /// ghostty_info_s
