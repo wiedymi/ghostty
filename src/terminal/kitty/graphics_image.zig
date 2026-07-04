@@ -24,6 +24,19 @@ const max_dimension = 10000;
 /// Maximum size in bytes, taken from Kitty.
 const max_size = 400 * 1024 * 1024; // 400MB
 
+fn parsePngDimensions(data: []const u8) ?struct { width: u32, height: u32 } {
+    const signature = [_]u8{ 137, 80, 78, 71, 13, 10, 26, 10 };
+    if (data.len < 24) return null;
+    if (!std.mem.eql(u8, data[0..8], &signature)) return null;
+    if (!std.mem.eql(u8, data[12..16], "IHDR")) return null;
+
+    const width = std.mem.readInt(u32, data[16..20], .big);
+    const height = std.mem.readInt(u32, data[20..24], .big);
+    if (width == 0 or height == 0) return null;
+
+    return .{ .width = width, .height = height };
+}
+
 /// An image that is still being loaded. The image should be initialized
 /// using init on the first chunk and then addData for each subsequent
 /// chunk. Once all chunks have been added, complete should be called
@@ -99,6 +112,8 @@ pub const LoadingImage = struct {
             try result.addData(alloc, cmd.data);
             return result;
         }
+
+        if (comptime builtin.os.tag == .freestanding) return error.UnsupportedMedium;
 
         // Verify our capabilities and limits allow this.
         {
@@ -382,23 +397,37 @@ pub const LoadingImage = struct {
         // Decompress the data if it is compressed.
         try self.decompress(alloc);
 
-        // Decode the png if we have to
-        if (img.format == .png) try self.decodePng(alloc);
+        // Decode the PNG if possible. On freestanding targets we keep the
+        // encoded payload for the host renderer, but still need dimensions.
+        if (img.format == .png) {
+            if (comptime builtin.target.os.tag == .freestanding) {
+                if (img.width == 0 or img.height == 0) {
+                    const dims = parsePngDimensions(self.data.items) orelse
+                        return error.InvalidData;
+                    img.width = dims.width;
+                    img.height = dims.height;
+                }
+            } else {
+                try self.decodePng(alloc);
+            }
+        }
 
         // Validate our dimensions.
         if (img.width == 0 or img.height == 0) return error.DimensionsRequired;
         if (img.width > max_dimension or img.height > max_dimension) return error.DimensionsTooLarge;
 
-        // Data length must be what we expect
-        const bpp = command.Transmission.formatBpp(img.format);
-        const expected_len = img.width * img.height * bpp;
-        const actual_len = self.data.items.len;
-        if (actual_len != expected_len) {
-            std.log.warn(
-                "unexpected length image id={} width={} height={} bpp={} expected_len={} actual_len={}",
-                .{ img.id, img.width, img.height, bpp, expected_len, actual_len },
-            );
-            return error.InvalidData;
+        // Data length must be what we expect for raw formats.
+        if (img.format != .png) {
+            const bpp = command.Transmission.formatBpp(img.format);
+            const expected_len = img.width * img.height * bpp;
+            const actual_len = self.data.items.len;
+            if (actual_len != expected_len) {
+                std.log.warn(
+                    "unexpected length image id={} width={} height={} bpp={} expected_len={} actual_len={}",
+                    .{ img.id, img.width, img.height, bpp, expected_len, actual_len },
+                );
+                return error.InvalidData;
+            }
         }
 
         // Everything looks good, copy the image data over.
@@ -499,11 +528,10 @@ pub const LoadingImage = struct {
 
 /// Image represents a single fully loaded image.
 ///
-/// The image data is always fully decoded raw pixels: loading inflates
+/// The image data is usually fully decoded raw pixels: loading inflates
 /// any zlib-compressed payload and decodes PNG into RGBA before an image
-/// is completed, so `compression` is always `.none` and `format` is
-/// never `.png` for a stored image, and `data.len` always equals
-/// `width * height * bytes-per-pixel`.
+/// is completed. On freestanding targets, PNG payloads stay encoded so
+/// the host renderer can decode them.
 pub const Image = struct {
     id: u32 = 0,
     number: u32 = 0,
