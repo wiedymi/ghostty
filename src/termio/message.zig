@@ -97,6 +97,9 @@ pub const Message = union(enum) {
     /// Write where the data is allocated and must be freed.
     write_alloc: WriteReq.Alloc,
 
+    /// Set the write callback for the callback backend.
+    set_write_callback: SetWriteCallback,
+
     /// The payload of the kitty_clipboard_grant_* messages. The
     /// password is allocated and must be freed.
     pub const KittyClipboardGrant = struct {
@@ -133,6 +136,12 @@ pub const Message = union(enum) {
 
     /// The types of size reports that we support.
     pub const SizeReport = terminal.size_report.Style;
+
+    /// Payload for setting the write callback on callback backend.
+    pub const SetWriteCallback = struct {
+        write_fn: ?termio.Callback.WriteFn,
+        userdata: ?*anyopaque,
+    };
 };
 
 test {
