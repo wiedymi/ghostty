@@ -1986,13 +1986,11 @@ keybind: Keybinds = .{},
 /// and the left and right window borders. The value is in points, meaning that
 /// it will be scaled appropriately for screen DPI.
 ///
-/// If this value is set too large, the screen will render nothing, because the
-/// grid will be completely squished by the padding. It is up to you as the user
-/// to pick a reasonable value. If you pick an unreasonable value, a warning
-/// will appear in the logs.
+/// If the combined padding is too large for the current surface, the effective
+/// padding is reduced proportionally so it does not remove space needed by the
+/// terminal grid.
 ///
-/// Changing this configuration at runtime will only affect new terminals, i.e.
-/// new windows, tabs, etc.
+/// Changing this configuration at runtime affects existing and new terminals.
 ///
 /// To set a different left and right padding, specify two numerical values
 /// separated by a comma. For example, `window-padding-x = 2,4` will set the
@@ -2005,13 +2003,11 @@ keybind: Keybinds = .{},
 /// the top and bottom window borders. The value is in points, meaning that it
 /// will be scaled appropriately for screen DPI.
 ///
-/// If this value is set too large, the screen will render nothing, because the
-/// grid will be completely squished by the padding. It is up to you as the user
-/// to pick a reasonable value. If you pick an unreasonable value, a warning
-/// will appear in the logs.
+/// If the combined padding is too large for the current surface, the effective
+/// padding is reduced proportionally so it does not remove space needed by the
+/// terminal grid.
 ///
-/// Changing this configuration at runtime will only affect new terminals,
-/// i.e. new windows, tabs, etc.
+/// Changing this configuration at runtime affects existing and new terminals.
 ///
 /// To set a different top and bottom padding, specify two numerical values
 /// separated by a comma. For example, `window-padding-y = 2,4` will set the

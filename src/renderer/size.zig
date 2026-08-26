@@ -274,6 +274,46 @@ pub const Padding = extern struct {
     right: u32 = 0,
     left: u32 = 0,
 
+    /// Fit explicit padding into the current surface while preserving space
+    /// for one complete cell when the surface can contain one.
+    pub fn fitToGrid(self: Padding, screen: ScreenSize, cell: CellSize) Padding {
+        const horizontal = fitPair(
+            self.left,
+            self.right,
+            screen.width -| cell.width,
+        );
+        const vertical = fitPair(
+            self.top,
+            self.bottom,
+            screen.height -| cell.height,
+        );
+
+        return .{
+            .top = vertical.start,
+            .bottom = vertical.end,
+            .left = horizontal.start,
+            .right = horizontal.end,
+        };
+    }
+
+    const FittedPair = struct {
+        start: u32,
+        end: u32,
+    };
+
+    fn fitPair(start: u32, end: u32, available: u32) FittedPair {
+        const total = @as(u64, start) + @as(u64, end);
+        if (total <= @as(u64, available)) return .{ .start = start, .end = end };
+        if (available == 0) return .{ .start = 0, .end = 0 };
+
+        const fitted_start = (@as(u64, available) * @as(u64, start)) / total;
+        const fitted_start_u32: u32 = @intCast(fitted_start);
+        return .{
+            .start = fitted_start_u32,
+            .end = available - fitted_start_u32,
+        };
+    }
+
     /// Returns padding that balances the whitespace around the screen
     /// for the given grid and cell sizes.
     pub fn balanced(screen: ScreenSize, grid: GridSize, cell: CellSize) Padding {
@@ -372,6 +412,50 @@ test "Padding balanced on zero" {
     const screen: ScreenSize = .{ .width = 0, .height = 0 };
     const padding = Padding.balanced(screen, grid, cell);
     try testing.expectEqual(Padding{}, padding);
+}
+
+test "Padding fitToGrid preserves padding when one cell remains" {
+    const testing = std.testing;
+    const padding: Padding = .{ .top = 10, .bottom = 10, .left = 20, .right = 20 };
+
+    try testing.expectEqual(
+        padding,
+        padding.fitToGrid(
+            .{ .width = 100, .height = 60 },
+            .{ .width = 10, .height = 20 },
+        ),
+    );
+}
+
+test "Padding fitToGrid proportionally limits excessive padding" {
+    const testing = std.testing;
+    const padding: Padding = .{ .top = 30, .bottom = 30, .left = 80, .right = 80 };
+
+    try testing.expectEqual(
+        Padding{ .top = 20, .bottom = 20, .left = 45, .right = 45 },
+        padding.fitToGrid(
+            .{ .width = 100, .height = 60 },
+            .{ .width = 10, .height = 20 },
+        ),
+    );
+}
+
+test "Padding fitToGrid handles zero and extreme sizes without overflow" {
+    const testing = std.testing;
+    const padding: Padding = .{
+        .top = std.math.maxInt(u32),
+        .bottom = std.math.maxInt(u32),
+        .left = std.math.maxInt(u32),
+        .right = std.math.maxInt(u32),
+    };
+
+    try testing.expectEqual(
+        Padding{},
+        padding.fitToGrid(
+            .{ .width = 0, .height = 0 },
+            .{ .width = 10, .height = 20 },
+        ),
+    );
 }
 
 test "GridSize update exact" {

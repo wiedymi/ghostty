@@ -543,7 +543,7 @@ pub fn init(
         const explicit: rendererpkg.Padding = derived_config.scaledPadding(
             x_dpi,
             y_dpi,
-        );
+        ).fitToGrid(size.screen, size.cell);
         if (derived_config.window_padding_balance != .false) {
             size.balancePadding(explicit, derived_config.window_padding_balance);
         } else {
@@ -2424,7 +2424,7 @@ fn setSelectionAndCopy(self: *Surface, sel: terminal.Selection) !void {
 fn setCellSize(self: *Surface, size: rendererpkg.CellSize) !void {
     // Update our cell size within our size struct
     self.size.cell = size;
-    self.balancePaddingIfNeeded();
+    self.updatePadding();
 
     // Notify the terminal
     self.queueIo(.{ .resize = self.size }, .unlocked);
@@ -2513,7 +2513,7 @@ pub fn sizeCallback(self: *Surface, size: apprt.SurfaceSize) !void {
 fn resize(self: *Surface, size: rendererpkg.ScreenSize) !void {
     // Save our screen size
     self.size.screen = size;
-    self.balancePaddingIfNeeded();
+    self.updatePadding();
 
     // Recalculate our grid size. Because Ghostty supports fluid resizing,
     // its possible the grid doesn't change at all even if the screen size changes.
@@ -2533,13 +2533,20 @@ fn resize(self: *Surface, size: rendererpkg.ScreenSize) !void {
     self.queueIo(.{ .resize = self.size }, .unlocked);
 }
 
-/// Recalculate the balanced padding if needed.
-fn balancePaddingIfNeeded(self: *Surface) void {
-    if (self.config.window_padding_balance == .false) return;
+/// Recalculate effective padding for the current config and surface geometry.
+fn updatePadding(self: *Surface) void {
     const content_scale = try self.rt_surface.getContentScale();
     const x_dpi = content_scale.x * font.face.default_dpi;
     const y_dpi = content_scale.y * font.face.default_dpi;
-    self.size.balancePadding(self.config.scaledPadding(x_dpi, y_dpi), self.config.window_padding_balance);
+    const explicit = self.config
+        .scaledPadding(x_dpi, y_dpi)
+        .fitToGrid(self.size.screen, self.size.cell);
+
+    if (self.config.window_padding_balance != .false) {
+        self.size.balancePadding(explicit, self.config.window_padding_balance);
+    } else {
+        self.size.padding = explicit;
+    }
 }
 
 /// Called to set the preedit state for character input. Preedit is used
@@ -3670,12 +3677,6 @@ pub fn contentScaleCallback(self: *Surface, content_scale: apprt.ContentScale) !
     }
 
     try self.setFontSize(size);
-
-    // Update our padding which is dependent on DPI. We only do this for
-    // unbalanced padding since balanced padding is not dependent on DPI.
-    if (self.config.window_padding_balance == .false) {
-        self.size.padding = self.config.scaledPadding(x_dpi, y_dpi);
-    }
 
     // Force a resize event because the change in padding will affect
     // pixel-level changes to the renderer and viewport.
