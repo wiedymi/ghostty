@@ -795,6 +795,13 @@ pub fn osVersionMin(tag: std.Target.Os.Tag) ?std.Target.Query.OsVersion {
             .patch = 0,
         } },
 
+        // VVTerm embeds GhosttyKit on iOS.
+        .ios => .{ .semver = .{
+            .major = 16,
+            .minor = 0,
+            .patch = 0,
+        } },
+
         // This should never happen currently. If we add a new target then
         // we should add a new case here.
         else => null,

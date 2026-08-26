@@ -24,6 +24,26 @@ pub fn init(
         Config.genericMacOSTarget(b, null),
     ));
 
+    const ios = try GhosttyLib.initStatic(b, &try deps.retarget(
+        b,
+        b.resolveTargetQuery(.{
+            .cpu_arch = .aarch64,
+            .os_tag = .ios,
+            .os_version_min = Config.osVersionMin(.ios),
+        }),
+    ));
+
+    const ios_simulator = try GhosttyLib.initStatic(b, &try deps.retarget(
+        b,
+        b.resolveTargetQuery(.{
+            .cpu_arch = .aarch64,
+            .cpu_model = .{ .explicit = &std.Target.aarch64.cpu.apple_a17 },
+            .os_tag = .ios,
+            .os_version_min = Config.osVersionMin(.ios),
+            .abi = .simulator,
+        }),
+    ));
+
     // Generate a headers directory with only ghostty.h and the module
     // map. We can't use include/ directly because it also contains the
     // libghostty-vt headers under include/ghostty/, which would trigger
@@ -45,6 +65,16 @@ pub fn init(
                     .library = macos_universal.output,
                     .headers = headers,
                     .dsym = macos_universal.dsym,
+                },
+                .{
+                    .library = ios.output,
+                    .headers = headers,
+                    .dsym = ios.dsym,
+                },
+                .{
+                    .library = ios_simulator.output,
+                    .headers = headers,
+                    .dsym = ios_simulator.dsym,
                 },
             },
 
