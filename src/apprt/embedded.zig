@@ -2515,9 +2515,10 @@ pub const CAPI = struct {
         /// The callback function type for writing data from terminal to external source.
         pub const WriteFn = termio.Callback.WriteFn;
 
-        /// Feed data into the terminal for display (e.g., SSH channel output).
-        /// This is the "output" from the remote source that should be rendered.
-        export fn ghostty_surface_feed_data(
+        /// Synchronously process external terminal output. Embedders must call
+        /// this from a dedicated worker thread, never the UI thread or this
+        /// surface's termio thread.
+        export fn ghostty_surface_feed_data_blocking(
             ptr: *Surface,
             data: [*]const u8,
             len: usize,
