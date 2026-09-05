@@ -10,6 +10,9 @@ pub const Options = struct {
         lib,
     };
 
+    /// Enable browser graphics only when the embedder supplies time and PNG decoding.
+    wasm_kitty_graphics: bool = false,
+
     /// The target artifact to build. This will gate some functionality.
     artifact: Artifact,
 
@@ -268,11 +271,12 @@ pub const Options = struct {
 
     /// Whether the Kitty graphics feature is effectively enabled for
     /// the given target. Kitty graphics requires the ability to get
-    /// timestamps and there is no way to do that on freestanding
-    /// targets, so it is always disabled there regardless of the
-    /// feature setting.
+    /// timestamps. Freestanding Wasm embedders may opt in when they
+    /// supply the required host services; other freestanding targets
+    /// keep graphics disabled.
     pub fn kittyGraphics(self: Options, target: std.Target) bool {
-        if (target.os.tag == .freestanding) return false;
+        if (target.os.tag == .freestanding and
+            !(target.cpu.arch.isWasm() and self.wasm_kitty_graphics)) return false;
         return self.features.kitty_graphics;
     }
 

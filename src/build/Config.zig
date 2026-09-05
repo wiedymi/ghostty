@@ -65,6 +65,7 @@ emit_unicode_table_gen: bool = false,
 /// Feature gates for libghostty-vt artifacts (-Dvt-features). The full
 /// Ghostty application ignores this and always enables everything.
 vt_features: TerminalBuildOptions.Features = .{},
+wasm_kitty_graphics: bool = false,
 
 /// True when Ghostty is being built as a dependency of another project
 /// rather than as the root project.
@@ -426,6 +427,7 @@ pub fn init(b: *std.Build, appVersion: []const u8, libVersion: []const u8) !Conf
 
     config.emit_lib_vt = emit_lib_vt;
 
+    config.wasm_kitty_graphics = b.option(bool, "wasm-kitty-graphics", "Enable Kitty graphics for Wasm embedders supplying time and image decoding") orelse false;
     config.vt_features = features: {
         const list = b.option(
             []const u8,
@@ -713,6 +715,7 @@ pub fn terminalOptions(
         .simd = self.simd,
         .oniguruma = true,
         .c_abi = false,
+        .wasm_kitty_graphics = self.wasm_kitty_graphics,
         // The application requires every feature; only lib artifacts
         // may trim them.
         .features = switch (artifact) {

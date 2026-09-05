@@ -150,6 +150,9 @@ pub const LoadingImage = struct {
             return result;
         }
 
+        // Browser hosts transmit image bytes directly; no filesystem exists.
+        if (comptime builtin.os.tag == .freestanding) return error.UnsupportedMedium;
+
         // Verify our capabilities and limits allow this.
         {
             // Special case if we don't support decoding PNGs and the format
