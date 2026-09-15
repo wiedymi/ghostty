@@ -1936,16 +1936,28 @@ pub const CAPI = struct {
     }
 
     export fn ghostty_surface_selection_anchor_new(surface: *Surface) ?*SelectionSnapshot.Anchor {
+        return selectionAnchorNew(surface, null);
+    }
+
+    export fn ghostty_surface_selection_anchor_new_endpoint(surface: *Surface, end: bool) ?*SelectionSnapshot.Anchor {
+        return selectionAnchorNew(surface, end);
+    }
+
+    fn selectionAnchorNew(surface: *Surface, endpoint: ?bool) ?*SelectionSnapshot.Anchor {
         const core = &surface.core_surface;
         core.renderer_state.mutex.lockUncancelable(global.io());
         defer core.renderer_state.mutex.unlock(global.io());
         core.validateHostSelection();
-        const value = (SelectionSnapshot.Anchor.init(&core.io.terminal) catch return null) orelse return null;
+        const value = (if (endpoint) |end|
+            SelectionSnapshot.Anchor.initEndpoint(&core.io.terminal, end)
+        else
+            SelectionSnapshot.Anchor.init(&core.io.terminal)) catch return null;
+        const resolved = value orelse return null;
         const anchor = global.alloc().create(SelectionSnapshot.Anchor) catch {
-            value.deinit(&core.io.terminal);
+            resolved.deinit(&core.io.terminal);
             return null;
         };
-        anchor.* = value;
+        anchor.* = resolved;
         return anchor;
     }
 

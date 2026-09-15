@@ -13,10 +13,20 @@ pub const Anchor = struct {
     screen_id: usize,
 
     pub fn init(t: *Terminal) !?Anchor {
+        return initSelected(t, null);
+    }
+
+    pub fn initEndpoint(t: *Terminal, end: bool) !?Anchor {
+        return initSelected(t, end);
+    }
+
+    fn initSelected(t: *Terminal, endpoint: ?bool) !?Anchor {
         const sel = t.screens.active.selection orelse return null;
         if (sel.start().garbage or sel.end().garbage) return null;
+        const first = if (endpoint) |end| (if (end) sel.bottomRight(t.screens.active) else sel.topLeft(t.screens.active)) else sel.start();
+        const last = if (endpoint != null) first else sel.end();
         return .{
-            .selection = try (Selection.init(sel.start(), sel.end(), false)).track(t.screens.active),
+            .selection = try (Selection.init(first, last, false)).track(t.screens.active),
             .screen_key = t.screens.active_key,
             .screen_id = t.screens.generation(t.screens.active_key),
         };
@@ -305,4 +315,31 @@ test "SelectionSnapshot keeps handle positions while a selected row is erased" {
     try std.testing.expect(blank.has_selection);
     try std.testing.expectEqual(offset, blank.selection_start);
     try std.testing.expectEqual(@as(usize, 18), blank.selection_len);
+}
+
+test "SelectionSnapshot endpoint anchor survives leaving viewport" {
+    const a = std.testing.allocator;
+    var t: Terminal = try .init(std.testing.io, a, .{ .cols = 20, .rows = 4 });
+    defer t.deinit(a);
+    try t.screens.active.testWriteString("first\r\nsecond\r\nthird\r\nfourth\r\nfifth\r\nsixth");
+    var initial = try Snapshot.init(a, &t);
+    defer initial.deinit(a, &t);
+    try std.testing.expect(try initial.select(a, &t, 42, 5));
+    var anchor = (try Anchor.initEndpoint(&t, true)).?;
+    defer anchor.deinit(&t);
+    t.screens.active.pages.scroll(.{ .delta_row = -2 });
+    var upper = try Snapshot.init(a, &t);
+    defer upper.deinit(a, &t);
+    try std.testing.expect(try upper.selectAnchored(a, &t, 0, 1, &anchor));
+    const text = try t.screens.active.selectionString(a, .{ .sel = t.screens.active.selection.?, .trim = false });
+    defer a.free(text);
+    try std.testing.expect(std.mem.startsWith(u8, text, "first"));
+    try std.testing.expect(std.mem.endsWith(u8, text, "fifth"));
+    t.screens.active.pages.scroll(.{ .delta_row = 2 });
+    var lower = try Snapshot.init(a, &t);
+    defer lower.deinit(a, &t);
+    try std.testing.expect(try lower.selectAnchored(a, &t, 43, 1, &anchor));
+    const shrunk = try t.screens.active.selectionString(a, .{ .sel = t.screens.active.selection.?, .trim = false });
+    defer a.free(shrunk);
+    try std.testing.expectEqualStrings("ifth", shrunk);
 }
