@@ -1297,6 +1297,9 @@ pub fn resize(self: *PageList, opts: Resize) Allocator.Error!void {
 
     // Recalculate our minimum limits. This allows grow to work properly when
     // increasing beyond the explicit limits to fit the active area.
+    const held_at_bottom = self.viewport == .pin and self.pinIsActive(self.viewport_pin.*);
+    defer if (held_at_bottom and self.viewport == .active) self.pinViewport();
+
     const old_limits = self.limits;
     self.limits.resize(
         opts.cols orelse self.cols,
@@ -1504,6 +1507,17 @@ fn resizeCols(
         self.total_rows = reflow_cursor.total_rows;
     }
 
+    // Reflow can unwrap enough rows that a history viewport pin lands in the
+    // active area before we do any growth below. Switch back
+    // to the active viewport now so intermediate grow() integrity checks stay
+    // valid.
+    switch (self.viewport) {
+        .active, .top => {},
+        .pin => if (self.total_rows < self.rows or self.pinIsActive(self.viewport_pin.*)) {
+            self.viewport = .active;
+        },
+    }
+
     // If our total rows is less than our active rows, we need to grow.
     // This can happen if you're growing columns such that enough active
     // rows unwrap that we no longer have enough.
@@ -1514,17 +1528,6 @@ fn resizeCols(
         if (total >= self.rows) break;
     } else {
         for (total..self.rows) |_| _ = try self.grow();
-    }
-
-    // Reflow can unwrap enough rows that a history viewport pin lands in the
-    // active area before we do any preserved-cursor growth below. Switch back
-    // to the active viewport now so intermediate grow() integrity checks stay
-    // valid.
-    switch (self.viewport) {
-        .active, .top => {},
-        .pin => if (self.pinIsActive(self.viewport_pin.*)) {
-            self.viewport = .active;
-        },
     }
 
     // See preserved_cursor setup for why.
@@ -3261,6 +3264,16 @@ pub const Scroll = union(enum) {
     /// as the top left of the viewport (ignoring the pin x value).
     pin: Pin,
 };
+
+/// Hold the current reading position, including when it is at the live bottom.
+pub fn pinViewport(self: *PageList) void {
+    if (self.limits.bytes.explicit == 0) return;
+    const top = self.getTopLeft(.viewport);
+    self.viewport_pin.* = top;
+    self.viewport = .pin;
+    self.viewport_pin_row_offset = null;
+    self.assertIntegrity();
+}
 
 /// Scroll the viewport. This will never create new scrollback, allocate
 /// pages, etc. This can only be used to move the viewport within the

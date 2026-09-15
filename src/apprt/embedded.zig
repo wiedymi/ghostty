@@ -1870,6 +1870,110 @@ pub const CAPI = struct {
         return surface.core_surface.hasSelection();
     }
 
+    // Immutable snapshot storage is owned by the host until explicitly freed.
+    // All access is serialized with terminal output by the renderer mutex.
+    const SelectionSnapshot = terminal.SelectionSnapshot;
+    const SelectionSnapshotView = extern struct {
+        text: [*:0]const u8,
+        text_len: usize,
+        cells: [*]const SelectionSnapshot.Cell,
+        cells_len: usize,
+        columns: u32,
+        rows: u32,
+        has_selection: bool,
+        unchanged: bool,
+        selection_start: usize,
+        selection_len: usize,
+    };
+
+    export fn ghostty_surface_selection_snapshot_new(surface: *Surface, previous: ?*const SelectionSnapshot, out: *SelectionSnapshotView) ?*SelectionSnapshot {
+        const core = &surface.core_surface;
+        core.renderer_state.mutex.lockUncancelable(global.io());
+        defer core.renderer_state.mutex.unlock(global.io());
+        core.validateHostSelection();
+        const snapshot = global.alloc().create(SelectionSnapshot) catch return null;
+        snapshot.* = SelectionSnapshot.init(global.alloc(), &core.io.terminal) catch |err| {
+            global.alloc().destroy(snapshot);
+            log.warn("error reading selection snapshot err={}", .{err});
+            return null;
+        };
+        out.* = .{
+            .text = snapshot.text.ptr,
+            .text_len = snapshot.text.len,
+            .cells = snapshot.cells.ptr,
+            .cells_len = snapshot.cells.len,
+            .columns = snapshot.cols,
+            .rows = snapshot.rows,
+            .has_selection = snapshot.has_selection,
+            .unchanged = if (previous) |old| old.matches(snapshot.*, &core.io.terminal) else false,
+            .selection_start = snapshot.selection_start,
+            .selection_len = snapshot.selection_len,
+        };
+        return snapshot;
+    }
+
+    export fn ghostty_surface_selection_snapshot_free(surface: *Surface, snapshot: *SelectionSnapshot) void {
+        const core = &surface.core_surface;
+        core.renderer_state.mutex.lockUncancelable(global.io());
+        defer core.renderer_state.mutex.unlock(global.io());
+        snapshot.deinit(global.alloc(), &core.io.terminal);
+        global.alloc().destroy(snapshot);
+    }
+
+    export fn ghostty_surface_selection_snapshot_select(surface: *Surface, snapshot: *const SelectionSnapshot, offset: usize, length: usize, anchor: ?*const SelectionSnapshot.Anchor) bool {
+        const core = &surface.core_surface;
+        core.renderer_state.mutex.lockUncancelable(global.io());
+        defer core.renderer_state.mutex.unlock(global.io());
+        const accepted = snapshot.selectAnchored(global.alloc(), &core.io.terminal, offset, length, anchor) catch |err| {
+            log.warn("error setting host selection err={}", .{err});
+            return false;
+        };
+        if (accepted) {
+            if (core.host_selection_text) |text| core.alloc.free(text);
+            core.host_selection_text = null;
+            core.host_selection_text = core.io.terminal.screens.active.selectionString(core.alloc, .{
+                .sel = core.io.terminal.screens.active.selection.?,
+                .trim = false,
+            }) catch {
+                core.setSelection(null) catch unreachable;
+                return false;
+            };
+            _ = core.rt_app.performAction(.{ .surface = core }, .selection_changed, {}) catch {};
+            surface.refresh();
+        }
+        return accepted;
+    }
+
+    export fn ghostty_surface_selection_anchor_new(surface: *Surface) ?*SelectionSnapshot.Anchor {
+        const core = &surface.core_surface;
+        core.renderer_state.mutex.lockUncancelable(global.io());
+        defer core.renderer_state.mutex.unlock(global.io());
+        core.validateHostSelection();
+        const value = (SelectionSnapshot.Anchor.init(&core.io.terminal) catch return null) orelse return null;
+        const anchor = global.alloc().create(SelectionSnapshot.Anchor) catch {
+            value.deinit(&core.io.terminal);
+            return null;
+        };
+        anchor.* = value;
+        return anchor;
+    }
+
+    export fn ghostty_surface_selection_anchor_free(surface: *Surface, anchor: *SelectionSnapshot.Anchor) void {
+        const core = &surface.core_surface;
+        core.renderer_state.mutex.lockUncancelable(global.io());
+        defer core.renderer_state.mutex.unlock(global.io());
+        anchor.deinit(&core.io.terminal);
+        global.alloc().destroy(anchor);
+    }
+
+    export fn ghostty_surface_clear_selection(surface: *Surface) void {
+        const core = &surface.core_surface;
+        core.renderer_state.mutex.lockUncancelable(global.io());
+        defer core.renderer_state.mutex.unlock(global.io());
+        core.setSelection(null) catch unreachable;
+        surface.refresh();
+    }
+
     /// Same as ghostty_surface_read_text but reads from the user selection,
     /// if any.
     export fn ghostty_surface_read_selection(
@@ -1880,6 +1984,7 @@ pub const CAPI = struct {
         core_surface.renderer_state.mutex.lockUncancelable(global.io());
         defer core_surface.renderer_state.mutex.unlock(global.io());
 
+        core_surface.validateHostSelection();
         // If we don't have a selection, do nothing.
         const core_sel = core_surface.io.terminal.screens.active.selection orelse return false;
 
