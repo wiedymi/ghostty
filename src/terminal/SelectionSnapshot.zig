@@ -73,11 +73,13 @@ pub fn init(a: Allocator, t: *Terminal) !Snapshot {
         const line = std.mem.trimEnd(u8, map.string, "\r\n");
         var it = (try std.unicode.Utf8View.init(line)).iterator();
         var byte_offset: usize = 0;
+        var end_column: u32 = 0;
         while (it.nextCodepoint()) |cp| {
             const byte_len = std.unicode.utf8CodepointSequenceLength(cp) catch unreachable;
             const pin = map.map.get(byte_offset) orelse return error.InvalidTextMap;
             const length: usize = if (cp > 0xFFFF) 2 else 1;
             const width: u32 = if (pin.rowAndCell().cell.wide == .wide) 2 else 1;
+            end_column = @as(u32, pin.x) + width;
             if (cells.items.len > 0 and cells.items[cells.items.len - 1].x == pin.x and
                 cells.items[cells.items.len - 1].y == y)
             {
@@ -93,6 +95,20 @@ pub fn init(a: Allocator, t: *Terminal) !Snapshot {
             byte_offset += byte_len;
         }
         try text.appendSlice(a, line);
+        // UIKit positions must include blank grid cells. Otherwise an erase or
+        // shorter redraw moves the handles even though the tracked pins did not move.
+        if (end_column > screen.pages.cols) return error.InvalidTextMap;
+        for (end_column..screen.pages.cols) |x| {
+            var pin = start;
+            pin.x = @intCast(x);
+            try cells.append(a, .{ .offset = utf16_len, .length = 1, .x = @intCast(x), .y = @intCast(y), .width = 1 });
+            if (tl != null and !pin.before(tl.?) and !br.?.before(pin)) {
+                if (selection_start == null) selection_start = utf16_len;
+                selection_end = try std.math.add(usize, utf16_len, 1);
+            }
+            try text.append(a, ' ');
+            utf16_len = try std.math.add(usize, utf16_len, 1);
+        }
         if (y + 1 < screen.pages.rows) {
             try text.append(a, '\n');
             utf16_len = try std.math.add(usize, utf16_len, 1);
@@ -250,7 +266,10 @@ test "SelectionSnapshot preserves selection through selected text redraws" {
     try t.screens.active.testWriteString("Footer animation 0");
     var before = try Snapshot.init(a, &t);
     defer before.deinit(a, &t);
-    try std.testing.expect(try before.select(a, &t, 1, 18));
+    const offset = for (before.cells) |cell| {
+        if (cell.y == 1 and cell.x == 0) break cell.offset;
+    } else unreachable;
+    try std.testing.expect(try before.select(a, &t, offset, 18));
     for (0..10) |frame| {
         t.screens.active.cursorAbsolute(17, 1);
         const digit = [_]u8{'0' + @as(u8, @intCast(frame))};
@@ -258,10 +277,32 @@ test "SelectionSnapshot preserves selection through selected text redraws" {
         var after = try Snapshot.init(a, &t);
         defer after.deinit(a, &t);
         try std.testing.expect(after.has_selection);
-        try std.testing.expectEqual(@as(usize, 1), after.selection_start);
+        try std.testing.expectEqual(offset, after.selection_start);
         try std.testing.expectEqual(@as(usize, 18), after.selection_len);
         const text = try t.screens.active.selectionString(a, .{ .sel = t.screens.active.selection.?, .trim = false });
         defer a.free(text);
         try std.testing.expectEqual(digit[0], text[text.len - 1]);
     }
+}
+
+test "SelectionSnapshot keeps handle positions while a selected row is erased" {
+    const a = std.testing.allocator;
+    var t: Terminal = try .init(std.testing.io, a, .{ .cols = 20, .rows = 3 });
+    defer t.deinit(a);
+    t.screens.active.cursorAbsolute(0, 1);
+    try t.screens.active.testWriteString("Footer animation 0");
+    var before = try Snapshot.init(a, &t);
+    defer before.deinit(a, &t);
+    const offset = for (before.cells) |cell| {
+        if (cell.y == 1 and cell.x == 0) break cell.offset;
+    } else unreachable;
+    try std.testing.expect(try before.select(a, &t, offset, 18));
+    var stream = t.vtStream();
+    defer stream.deinit();
+    stream.nextSlice("\x1b[2;1H\x1b[2K");
+    var blank = try Snapshot.init(a, &t);
+    defer blank.deinit(a, &t);
+    try std.testing.expect(blank.has_selection);
+    try std.testing.expectEqual(offset, blank.selection_start);
+    try std.testing.expectEqual(@as(usize, 18), blank.selection_len);
 }
