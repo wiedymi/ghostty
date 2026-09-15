@@ -55,6 +55,8 @@ utf16_len: usize,
 has_selection: bool,
 selection_start: usize,
 selection_len: usize,
+selection_start_visible: bool,
+selection_end_visible: bool,
 screen_key: ScreenSet.Key,
 screen_id: usize,
 top: *Pin,
@@ -73,6 +75,7 @@ pub fn init(a: Allocator, t: *Terminal) !Snapshot {
     const sel = screen.selection;
     const tl = if (sel) |v| v.topLeft(screen) else null;
     const br = if (sel) |v| v.bottomRight(screen) else null;
+    const viewport_bottom = screen.pages.getBottomRight(.viewport);
     for (0..screen.pages.rows) |y| {
         const start = screen.pages.pin(.{ .viewport = .{ .x = 0, .y = @intCast(y) } }) orelse break;
         var end = start;
@@ -135,6 +138,8 @@ pub fn init(a: Allocator, t: *Terminal) !Snapshot {
         .has_selection = sel != null,
         .selection_start = selection_start orelse 0,
         .selection_len = if (selection_start) |start| selection_end - start else 0,
+        .selection_start_visible = if (tl) |pin| if (viewport_bottom) |bottom| pin.isBetween(top.*, bottom) else false else false,
+        .selection_end_visible = if (br) |pin| if (viewport_bottom) |bottom| pin.isBetween(top.*, bottom) else false else false,
         .screen_key = t.screens.active_key,
         .screen_id = t.screens.generation(t.screens.active_key),
         .top = top,
@@ -330,7 +335,13 @@ test "SelectionSnapshot endpoint anchor survives leaving viewport" {
     t.screens.active.pages.scroll(.{ .delta_row = -2 });
     var upper = try Snapshot.init(a, &t);
     defer upper.deinit(a, &t);
+    try std.testing.expect(!upper.selection_start_visible);
+    try std.testing.expect(!upper.selection_end_visible);
     try std.testing.expect(try upper.selectAnchored(a, &t, 0, 1, &anchor));
+    var extended = try Snapshot.init(a, &t);
+    defer extended.deinit(a, &t);
+    try std.testing.expect(extended.selection_start_visible);
+    try std.testing.expect(!extended.selection_end_visible);
     const text = try t.screens.active.selectionString(a, .{ .sel = t.screens.active.selection.?, .trim = false });
     defer a.free(text);
     try std.testing.expect(std.mem.startsWith(u8, text, "first"));
@@ -338,6 +349,8 @@ test "SelectionSnapshot endpoint anchor survives leaving viewport" {
     t.screens.active.pages.scroll(.{ .delta_row = 2 });
     var lower = try Snapshot.init(a, &t);
     defer lower.deinit(a, &t);
+    try std.testing.expect(!lower.selection_start_visible);
+    try std.testing.expect(lower.selection_end_visible);
     try std.testing.expect(try lower.selectAnchored(a, &t, 43, 1, &anchor));
     const shrunk = try t.screens.active.selectionString(a, .{ .sel = t.screens.active.selection.?, .trim = false });
     defer a.free(shrunk);

@@ -1884,6 +1884,8 @@ pub const CAPI = struct {
         unchanged: bool,
         selection_start: usize,
         selection_len: usize,
+        selection_start_visible: bool,
+        selection_end_visible: bool,
     };
 
     export fn ghostty_surface_selection_snapshot_new(surface: *Surface, previous: ?*const SelectionSnapshot, out: *SelectionSnapshotView) ?*SelectionSnapshot {
@@ -1908,6 +1910,8 @@ pub const CAPI = struct {
             .unchanged = if (previous) |old| old.matches(snapshot.*, &core.io.terminal) else false,
             .selection_start = snapshot.selection_start,
             .selection_len = snapshot.selection_len,
+            .selection_start_visible = snapshot.selection_start_visible,
+            .selection_end_visible = snapshot.selection_end_visible,
         };
         return snapshot;
     }

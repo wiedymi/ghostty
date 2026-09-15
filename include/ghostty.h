@@ -1264,6 +1264,8 @@ typedef struct {
   bool unchanged;
   uintptr_t selection_start;
   uintptr_t selection_len;
+  bool selection_start_visible;
+  bool selection_end_visible;
 } ghostty_selection_snapshot_s;
 ghostty_selection_snapshot_t ghostty_surface_selection_snapshot_new(ghostty_surface_t, ghostty_selection_snapshot_t, ghostty_selection_snapshot_s*);
 void ghostty_surface_selection_snapshot_free(ghostty_surface_t, ghostty_selection_snapshot_t);
