@@ -1929,15 +1929,6 @@ pub const CAPI = struct {
             return false;
         };
         if (accepted) {
-            if (core.host_selection_text) |text| core.alloc.free(text);
-            core.host_selection_text = null;
-            core.host_selection_text = core.io.terminal.screens.active.selectionString(core.alloc, .{
-                .sel = core.io.terminal.screens.active.selection.?,
-                .trim = false,
-            }) catch {
-                core.setSelection(null) catch unreachable;
-                return false;
-            };
             _ = core.rt_app.performAction(.{ .surface = core }, .selection_changed, {}) catch {};
             surface.refresh();
         }

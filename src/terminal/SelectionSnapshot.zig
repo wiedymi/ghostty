@@ -241,3 +241,27 @@ test "SelectionSnapshot drag anchor follows reflow and shrinks" {
     defer a.free(selected);
     try std.testing.expectEqualStrings("selected", selected);
 }
+
+test "SelectionSnapshot preserves selection through selected text redraws" {
+    const a = std.testing.allocator;
+    var t: Terminal = try .init(std.testing.io, a, .{ .cols = 20, .rows = 3 });
+    defer t.deinit(a);
+    t.screens.active.cursorAbsolute(0, 1);
+    try t.screens.active.testWriteString("Footer animation 0");
+    var before = try Snapshot.init(a, &t);
+    defer before.deinit(a, &t);
+    try std.testing.expect(try before.select(a, &t, 1, 18));
+    for (0..10) |frame| {
+        t.screens.active.cursorAbsolute(17, 1);
+        const digit = [_]u8{'0' + @as(u8, @intCast(frame))};
+        try t.screens.active.testWriteString(&digit);
+        var after = try Snapshot.init(a, &t);
+        defer after.deinit(a, &t);
+        try std.testing.expect(after.has_selection);
+        try std.testing.expectEqual(@as(usize, 1), after.selection_start);
+        try std.testing.expectEqual(@as(usize, 18), after.selection_len);
+        const text = try t.screens.active.selectionString(a, .{ .sel = t.screens.active.selection.?, .trim = false });
+        defer a.free(text);
+        try std.testing.expectEqual(digit[0], text[text.len - 1]);
+    }
+}

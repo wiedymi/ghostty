@@ -127,8 +127,6 @@ last_binding_trigger: u64 = 0,
 /// The terminal IO handler.
 io: termio.Termio,
 
-/// Original text for host-managed selection; output must not retarget Copy.
-host_selection_text: ?[:0]const u8 = null,
 io_thread: termio.Thread,
 io_thr: std.Thread,
 
@@ -813,7 +811,6 @@ pub fn init(
 }
 
 pub fn deinit(self: *Surface) void {
-    if (self.host_selection_text) |text| self.alloc.free(text);
     // Stop search thread
     if (self.search) |*s| s.deinit();
 
@@ -2365,8 +2362,6 @@ fn copySelectionToClipboards(
 ///
 /// This must be called with the renderer mutex held.
 pub fn setSelection(self: *Surface, sel_: ?terminal.Selection) !void {
-    if (self.host_selection_text) |text| self.alloc.free(text);
-    self.host_selection_text = null;
     // Compute the transition before `select` below, which untracks (frees)
     // the previous selection's tracked pins; reading them after would be a
     // use-after-free.
@@ -2392,23 +2387,11 @@ pub fn setSelection(self: *Surface, sel_: ?terminal.Selection) !void {
 
 /// Called under the renderer lock before projecting or copying host selection.
 pub fn validateHostSelection(self: *Surface) void {
-    const expected = self.host_selection_text orelse return;
-    const screen = self.io.terminal.screens.active;
-    const sel = screen.selection orelse {
-        self.alloc.free(expected);
-        self.host_selection_text = null;
-        return;
-    };
+    const sel = self.io.terminal.screens.active.selection orelse return;
+    // Match pointer selection: redraws can change text without invalidating its pins.
     if (sel.start().garbage or sel.end().garbage) {
         self.setSelection(null) catch unreachable;
-        return;
     }
-    const actual = screen.selectionString(self.alloc, .{ .sel = sel, .trim = false }) catch {
-        self.setSelection(null) catch unreachable;
-        return;
-    };
-    defer self.alloc.free(actual);
-    if (!std.mem.eql(u8, expected, actual)) self.setSelection(null) catch unreachable;
 }
 
 /// Set a selection and, per `copy_on_select`, copy it to the clipboard.
